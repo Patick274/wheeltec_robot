@@ -18,3 +18,4 @@ log/
 # IDE cache
 .vscode/browse.vc.db
 
+src/CMakeLists.txt

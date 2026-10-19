@@ -1,0 +1,7 @@
+# 相对本会话下限位零点的绝对高度，单位mm；不是相对步长。
+float64 height_mm
+float64 speed_mm_s
+---
+# accepted=true表示已下发并确认接收，是否到位继续查看/lift/status。
+bool accepted
+string message

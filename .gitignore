@@ -1,0 +1,20 @@
+# Catkin workspace
+build/
+devel/
+install/
+log/
+*.catkin
+.ros/
+
+# Editor temp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS trash
+.Trash-1000/
+
+# IDE cache
+.vscode/browse.vc.db
+

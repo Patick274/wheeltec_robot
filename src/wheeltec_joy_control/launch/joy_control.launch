@@ -1,0 +1,17 @@
+<launch>
+    <!--打开手柄控制节点
+        注意: 输出话题由 cmd_vel 重映射为 cmd_vel_teleop,
+        即先交给 twist_mux 仲裁(高优先级), 再由 mux 统一发给底盘。
+        twist_mux 节点在底盘启动文件 base_serial.launch 中启动 -->
+    <node pkg="wheeltec_joy" type="joycontrol" name="joy_control" output="screen">
+       <param name="axis_linear"   type="int"      value="1" />
+       <param name="axis_angular"  type="int"      value="0"/>
+       <param name="vlinear"       type="double"   value="0.3" />
+       <param name="vangular"      type="double"   value="1"/>
+       <remap from="cmd_vel" to="cmd_vel_teleop"/>
+    </node>
+    <!--获取手柄数据节点
+        包名以 package.xml 中的 <name>wheeltec_joy</name> 为准,
+        与文件夹名 wheeltec_joy_control 不同, 这里必须写 wheeltec_joy -->
+   <include file="$(find wheeltec_joy)/launch/joy_data.launch" />
+</launch>

@@ -1,0 +1,41 @@
+# 实物默认只读；完成标定与限位验证后再开放运动。完整说明见根目录explain.yaml。
+# can_interface为Linux网卡名；不是COM口、不是/dev/ttyUSB0。
+can_interface: can0
+node_id: 1
+sdo_timeout_s: 0.15
+poll_hz: 10.0
+
+motion_enabled: false  # 总运动许可；启动时依然不会自动使能。
+commissioning_confirmed: false
+# 需实测两个方向的硬件限位、驱动器输入功能和极性。
+# 当前只有下限位时应保持false，软件参数不能替代缺少的上限位。
+drive_limits_verified: false
+
+# KS3有效反馈精度，单位inc/电机转；不是编码器铭牌位数，未知时保持0。
+# 不可直接照抄手册示例65536；实际值应通过KS3或厂家确认。
+encoder_counts_per_rev: 0
+# 电机每转对应机构实际伸长毫米数。图纸候选36/16=2.25，
+# 实际传动和多级伸缩倍率必须核实，未知时保持0。
+mm_per_motor_rev: 0.0
+# 6063计数增大对应上升填+1，计数减小对应上升填-1。
+up_direction: 1
+# 图纸行程4200mm；软件允许行程需实测并留余量，未确认时保持0。
+travel_mm: 0.0
+
+# 以下是本程序的保守默认值，不是厂家的机械性能保证。
+max_speed_mm_s: 5.0
+max_motor_rpm: 200.0
+acceleration_rps_s: 1.0
+quick_stop_deceleration_rps_s: 2.0
+max_jog_mm: 1.0
+motion_timeout_s: 30.0
+position_tolerance_mm: 0.2
+
+# 实物必须保留停车检查；下面话题需与底盘实际发布/订阅名称对应。
+require_base_stationary: true
+base_odom_topic: /odom
+base_command_topic: /cmd_vel
+odom_timeout_s: 0.5
+base_stationary_s: 1.0
+base_linear_threshold_m_s: 0.01
+base_angular_threshold_rad_s: 0.02

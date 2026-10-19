@@ -1,0 +1,26 @@
+<launch>
+
+  <!-- navigation common params-->
+  <rosparam file="$(find turn_on_wheeltec_robot)/param_common/local_costmap_params.yaml"      command="load" ns="move_base"/>
+  <rosparam file="$(find turn_on_wheeltec_robot)/param_common/global_costmap_params.yaml"     command="load" ns="move_base"/>
+  <rosparam file="$(find turn_on_wheeltec_robot)/param_common/move_base_params.yaml"          command="load" ns="move_base"/>
+  <rosparam file="$(find turn_on_wheeltec_robot)/param_common/base_global_planner_param.yaml" command="load" ns="move_base"/>
+  
+  <param name="move_base/base_local_planner"    type="string" value="teb_local_planner/TebLocalPlannerROS"/>
+
+  <!-- Arguments参数 -->
+  <arg name="car_mode"  default="" />
+
+  <!-- car_mode and params-->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <rosparam file="$(find turn_on_wheeltec_robot)/costmap_common_params/param_$(arg car_mode)/teb_local_planner_params.yaml"  command="load"/>
+    <rosparam file="$(find turn_on_wheeltec_robot)/costmap_common_params/param_$(arg car_mode)/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find turn_on_wheeltec_robot)/costmap_common_params/param_$(arg car_mode)/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <!-- 导航速度指令不再直接发给底盘, 而是发给 twist_mux 的导航输入端,
+         手柄推动时会被手柄指令抢占, 手柄松手 0.5s 后导航自动恢复 -->
+    <remap from="cmd_vel" to="cmd_vel_nav"/>
+  </node>
+
+</launch>
+
+

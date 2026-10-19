@@ -1,0 +1,17 @@
+<launch>
+  <node pkg="turn_on_wheeltec_robot"
+        type="rviz_nav_console.py"
+        name="rviz_nav_console"
+        output="screen">
+    <param name="fixed_frame" value="map" />
+    <param name="map_topic" value="/map" />
+    <param name="scan_topic" value="/scan" />
+    <param name="pointcloud_topic" value="/camera/depth/color/points" />
+    <param name="global_path_topic" value="/move_base/NavfnROS/plan" />
+    <param name="local_path_topic" value="/move_base/TrajectoryPlannerROS/local_plan" />
+    <param name="amcl_topic" value="/amcl_pose" />
+    <param name="goal_topic" value="/move_base_simple/goal" />
+    <param name="initialpose_topic" value="/initialpose" />
+    <param name="waypoints_yaml" value="$(env HOME)/wheeltec_robot/src/turn_on_wheeltec_robot/param_common/discrete_nav_points.yaml" />
+  </node>
+</launch>

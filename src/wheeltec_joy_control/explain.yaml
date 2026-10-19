@@ -1,0 +1,15 @@
+# 这个文件本质上它就是一个手柄遥控（teleop）包，作用是把遥控器的数据转换成底盘速度指令。具体逻辑在 src/control.cpp：
+
+#   功能流程
+#   1. joy_data.launch 启动 joy_node，读取手柄原始数据发布到 /joy 话题
+#   2. control.cpp 订阅 /joy，把摇杆值换算成 geometry_msgs/Twist 发布到 /cmd_vel，底盘节点据此运动
+  
+#   除了基本遥控外的几个细节
+#   - 调速：右摇杆（axes[3]/axes[4]）实时缩放线速度和角速度（control.cpp:50-51）
+#   - 麦轮模式切换：按 B 键切换为麦克纳姆轮平移模式（左右横移），按 A 键恢复普通转向模式（control.cpp:73-87）
+#   - 默认速度参数：线速度 0.3 m/s，角速度 1 rad/s，可在 launch 中改
+
+#   导航任务的两点提醒
+#   1. 导航时不需要它。导航（move_base/teb）自己也会发 /cmd_vel，如果同时开着手柄遥控，两个节点会往同一个话题发指令互相打架。建议导航时关闭，或者加 twist_mux 做优先级仲裁。
+#   2. 包名不一致的隐患:joy_control.launch 里写的是 pkg="wheeltec_joy" 和 $(find wheeltec_joy)，但实际包文件夹叫 wheeltec_joy_control。如果这个包单独编译，rosrun/roslaunch
+#   时可能会报找不到包，需要注意 package.xml 里定义的名字和 launch 引用是否对得上。

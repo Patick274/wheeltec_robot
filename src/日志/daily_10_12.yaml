@@ -1,0 +1,47 @@
+# ============================================================
+# 工作日志 daily_10_12 (2026-10-12)
+# ============================================================
+
+date: 2026-10-12
+robot: wheeltec senior_wheeltec + 双 M10 雷达 (lsm10_v2) + 无摄像头
+scope: 修正融合帧 laser 在 TF 树中的挂载层级(base_footprint 平级 -> base_link 子帧)
+
+# ---------- 背景与问题 ----------
+背景:
+  - TF 树中 base_footprint 下出现 base_link 和 laser 两个平级子帧
+  - laser 是 lsm10_v2_double 融合 laser1+laser2 后发布的 /scan 帧,实为两者的融合结果
+  - 物理的 laser1/laser2 是 URDF 里 base_link 的子帧,laser 却挂在 base_footprint 下,层级不合理
+
+# ---------- 改动: robot_model_visualization.launch 的 base_to_laser ----------
+改动_base_to_laser:
+  文件: turn_on_wheeltec_robot/launch/robot_model_visualization.launch (senior_wheeltec 组)
+  改前: args="0 0 0.204 0 0 0  base_footprint laser 100"   # 与 base_link 平级
+  改后: args="0 0 0.035 0 0 0  base_link laser 100"        # 挂 base_link 下,与 laser1/laser2 平级
+  高度换算:
+    - 改前 0.204 = 0.169(base_footprint->base_link) + 0.035(雷达)
+    - 改后 0.035 = 与 laser1_joint/laser2_joint 的 z 一致(URDF 均为 z=0.035)
+    - 绝对高度不变: 激光在地面上仍 0.204,车体中心 x/y=0,不影响 gmapping/导航
+
+# ---------- 最终 TF 树 ----------
+tf树:
+  map -> odom_combined -> base_footprint -> base_link
+  base_footprint --(URDF base_footprint_joint, z=0.169)--> base_link
+  base_link --(static 0 0 0.035 0 0 0)--> laser (融合 /scan 帧,车体中心)
+  base_link --(laser1_joint, x=+0.3, z=0.035)--> laser1 (前雷达原始帧)
+  base_link --(laser2_joint, x=-0.3, z=0.035)--> laser2 (后雷达原始帧)
+  base_link --(gyro_joint)--> gyro_link
+  base_link --(left/right_wheel_joint)--> left/right_wheel_link
+  base_link --(arm_joint)--> arm_link
+
+# ---------- 知识点: 未接底盘时 map 相关 TF 缺失属正常 ----------
+知识点_无底盘缺TF:
+  - 断开底盘后,serial 节点读不到 /dev/wheeltec_controller,发不出 /odom
+  - robot_pose_ekf 依赖 /odom + /imu 才发 odom_combined->base_footprint,缺 odom 则这条消失
+  - gmapping 需要激光 + 里程计才发 map->odom_combined,缺里程计这条也消失
+  - 因此 RViz Fixed Frame=map 下看不到机器人属正常现象,接上底盘即可
+  - 排查: rostopic echo /odom; rosrun tf tf_echo map base_footprint; rqt_tf_tree
+
+# ---------- 待验证 ----------
+待验证:
+  - RViz 中 TF 树确认 laser 已挂到 base_link 下,与 laser1/laser2 平级
+  - 确认 /scan 显示位置仍在车体中心(绝对位置不变,不应有偏移)

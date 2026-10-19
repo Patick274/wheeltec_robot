@@ -1,0 +1,138 @@
+# ============================================================
+# 工作日志 daily_10_10 (2026-10-10)
+# ============================================================
+
+date: 2026-10-10
+robot: wheeltec senior_wheeltec (新 SolidWorks 模型) + 双 M10 雷达 (lsm10_v2) + 无摄像头
+scope: 模型切换到新 SolidWorks 模型 + 修正 TF 树 + 清理车型参数/模型 + car_mode 改为 senior_wheeltec
+
+# ---------- 背景与目标 ----------
+背景:
+  - 原运行的模型 mini_diff_robot.urdf(简易盒体+3轮) 与实际调试的机器人不符
+  - 新模型是 SolidWorks 导出的 wheeltec_robot/urdf/wheeltec_robot.urdf
+    (含升降杆 arm_link、双雷达、IMU)
+  - 目标: 传感器位置用新模型,命名沿用原代码;核心只改 wheeltec_robot.urdf 一个文件
+
+# ---------- 改动 1: wheeltec_robot/urdf/wheeltec_robot.urdf 重命名 ----------
+改动1_urdf重命名:
+  原则: 只改 link/joint 名,mash 文件名(.STL)与所有位置数值保持不变
+  传感器命名映射:
+    imu_link: gyro_link          # 原代码 wheeltec_robot.cpp:471 gyro_frame_id
+    imu_joint: gyro_joint
+    front_lidar_link: laser1     # 原代码 lsm10_v2.launch 前雷达 frame_id
+    front_lidar_joint: laser1_joint
+    back_lidar_link: laser2      # 原代码 lsm10_v2.launch 后雷达 frame_id
+    back_lidar_joint: laser2_joint
+  保持不变:
+    - base_footprint / base_link / base_footprint_joint
+    - arm_link / arm_joint (升降杆,原代码无对应,保留)
+    - left_wheel_link / right_wheel_link (joint 名与原代码一致)
+    - 所有 mesh 文件名 (imu_link.STL / front_lidar_link.STL / back_lidar_link.STL)
+
+# ---------- 改动 2: turn_on_wheeltec_robot/launch/robot_model_visualization.launch ----------
+改动2_launch修正:
+  base_to_link:
+    说明: 原为全局 static_transform(恒等),与新 URDF 的 base_footprint_joint(0.169) 双发布冲突
+    改动: 包进 <group unless="$(eval car_mode == 'mini_diff')">
+  mini_diff 组的 base_to_camera:
+    改动: 删除 (本车无摄像头)
+  mini_diff 组的 base_to_gyro:
+    改动: 删除 (gyro_link 已由新 URDF 的 gyro_joint 提供,避免 gyro_link 双父帧冲突)
+  mini_diff 的 robot_description:
+    改动: $(find turn_on_wheeltec_robot)/urdf/mini_diff_robot.urdf
+          -> $(find wheeltec_robot)/urdf/wheeltec_robot.urdf
+  mini_diff 的 base_to_laser (融合帧):
+    改动: "0.125 0 0.16 3.14 0 0"  ->  "0 0 0.204 0 0 0"
+
+# ---------- 关键技术结论 (lsm10 双雷达融合) ----------
+双雷达融合结论:
+  融合节点: lsm10_v2/src/lsm10_double.cpp (project() 函数)
+  补偿方式: 对每帧每个点做 旋转(rotate) + 平移(xoffset/yoffset),即
+            px = x*cos(rotate) - y*sin(rotate) + xoff
+            py = x*sin(rotate) + y*cos(rotate) + yoff
+  参数 (lsm10_v2.launch):
+    laser1(前,物理+0.3): rotate=180, xoffset=+0.3
+    laser2(后,物理-0.3): rotate=0,   xoffset=-0.3
+  结论:
+    - 前雷达是 180° 反转的,后雷达不转 (rotate 作用在数据上,非 TF 帧)
+    - x/y 位置已在融合内部补偿到车体中心(0,0);TF 不能再加 x/y 偏移
+    - 旋转也已在融合内部补偿;TF 不能再加 yaw
+    - z(高度) 融合内部不补偿(单线 2D),必须靠 TF 的 laser 帧 z 给出
+    - laser / laser1 / laser2 高度一致,均为 0.204
+      = 0.169(base_footprint->base_link) + 0.035(base_link->lidar)
+
+# ---------- 最终 TF 树 ----------
+tf树:
+  map -> odom_combined -> base_footprint -> base_link
+  base_footprint --(URDF base_footprint_joint, z=0.169)--> base_link
+  base_link --(gyro_joint)--> gyro_link (IMU)
+  base_link --(laser1_joint, x=+0.3, z=0.035)--> laser1 (前雷达原始帧)
+  base_link --(laser2_joint, x=-0.3, z=0.035)--> laser2 (后雷达原始帧)
+  base_link --(left/right_wheel_joint)--> left/right_wheel_link
+  base_link --(arm_joint)--> arm_link (升降杆)
+  base_footprint --(static 0 0 0.204 0 0 0)--> laser (融合 /scan 帧)
+
+# ---------- 改动 3: 新建 param_senior_wheeltec 代价地图参数 ----------
+改动3_costmap参数:
+  依据: base_link.STL 包围盒实测 车体 0.724m(长) × 0.559m(宽)
+  新建 costmap_common_params/param_senior_wheeltec/ (以 senior_diff 为模板):
+    costmap_common_params.yaml:
+      footprint: [[-0.37,-0.29],[-0.37,0.29],[0.37,0.29],[0.37,-0.29]]
+      inflation_radius: 0.4 (senior_diff 为 0.3)
+    teb_local_planner_params.yaml: footprint_model.vertices 同步同上
+    costmap_common_params_pure3d.yaml: 同上 footprint + inflation 0.4
+
+# ---------- 改动 4: 清理车型 + car_mode 改名 ----------
+改动4_清理与改名:
+  car_mode 改名: mini_diff -> senior_wheeltec
+    影响: turn_on_wheeltec_robot.launch(默认值+doc)
+          robot_model_visualization.launch(mini_diff 组改名 + base_to_link 的 unless 条件)
+          all_control_command/launch/turn_on_wheeltec_robot.launch(拷贝件同步)
+  costmap_common_params 清理:
+    删除其余 27 个车型目录,只留 param_senior_wheeltec(新)/param_senior_diff/param_six_wheel_with_lebai
+  urdf 模型清理:
+    删除其余 26 个车型 .urdf,只留 senior_diff_robot.urdf + six_wheel_with_lebai/ + six_only/
+    (新模型 wheeltec_robot.urdf 在 wheeltec_robot 包,未动)
+  robot_model_visualization.launch 精简: 重写为只剩 senior_wheeltec/senior_diff/six_wheel_with_lebai 三车型
+
+# ---------- 最终保留的车型 ----------
+保留车型:
+  - senior_wheeltec: 本车,新 SolidWorks 模型(wheeltec_robot.urdf) + param_senior_wheeltec
+  - senior_diff: senior_diff_robot.urdf + param_senior_diff
+  - six_wheel_with_lebai: six_wheel_with_lebai.xacro + param_six_wheel_with_lebai
+
+# ---------- 坐标系转换说明 (map → odom → base) ----------
+坐标系转换:
+  完整链条:
+    map -> odom_combined -> base_footprint -> base_link -> 传感器
+  各段含义与发布者:
+    base_footprint -> base_link:
+      发布: URDF 的 base_footprint_joint (robot_state_publisher)
+      含义: 固定车体高度 0.169m,静态不变
+    base_link -> laser/gyro_link/laser1/laser2:
+      发布: URDF 各 joint + base_to_laser 静态发布
+      含义: 传感器在车上的安装位置,静态不变
+    odom_combined -> base_footprint:
+      发布: robot_pose_ekf (轮子里程计 + IMU 融合, output_frame=odom_combined)
+      含义: 机器人相对上电起点的位姿,会漂移,~30Hz 连续平滑
+    map -> odom_combined:
+      发布: gmapping(建图时) / amcl(导航时), odom_frame 都配成 odom_combined
+      含义: 把漂移的里程计纠正到固定地图,更新慢且有跳变
+  为什么拆成 odom 和 map 两段:
+    - odom->base 保持局部平滑无跳变(运动控制/避障需要)
+    - 激光匹配定位的阶跃跳变全部塞进 map->odom 这一小段,不破坏 odom->base 的平滑轨迹
+  位姿合成 (TF 自动连乘):
+    Pose_in_map = (map->odom_combined) · (odom_combined->base_footprint) · (base_footprint->base_link)
+  注意:
+    - 里程计 frame 名是 odom_combined(robot_pose_ekf 输出),不是默认的 odom
+    - gmapping/amcl 的 odom_frame 都配置为 odom_combined,链条才接得上
+    - cartographer 建图时 is_cartographer:=true 关掉 ekf,cartographer 直接发 map->odom_combined
+
+# ---------- 待验证 ----------
+待验证:
+  - RViz 中核对 /scan 朝向: 机器人前方障碍物应出现在正前方
+    (若整体左右镜像 180°,说明 rotate 方向判断反了,把 base_to_laser 的 yaw 改回 3.14)
+  - RViz 中核对 /scan 与 /scan1 /scan2 位置关系:
+    laser1 在 +0.3、laser2 在 -0.3,融合 /scan 应落在两者之间的中心且与墙体对齐
+  - footprint/inflation_radius 为推导值(0.724×0.559 实测 + 余量,inflation 0.4),
+    跑导航后按实际避障/过窄口表现微调 param_senior_wheeltec/costmap_common_params.yaml

@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>GitHub 双机速查</title><link rel="stylesheet" href="../assets/learning.css"><main><p>PHM · 打印参考</p><h1>开工先拉，收工先交接</h1><h2>开工 / 工作区干净且在目标分支</h2><pre>git branch --show-current
+git status
+git pull --ff-only</pre><h2>收工 / 保存并检查</h2><pre>git add -- '实际文件路径'
+git diff --cached
+git commit -m "说明本次修改"
+git push
+git log -1 --oneline</pre><p>网页同一分支核对提交短编号；报错就停。新分支第一次推送需 git push -u origin 分支名。</p><h2>术语表</h2><table><tr><th>术语</th><th>含义</th></tr><tr><td>Git / GitHub</td><td>本地版本工具 / 远程托管平台</td></tr><tr><td>工作区 / 暂存区</td><td>正在编辑的文件 / 准备提交的内容</td></tr><tr><td>commit / push</td><td>形成本地提交 / 上传提交并更新远程引用</td></tr><tr><td>clone / fetch / pull</td><td>首次克隆 / 获取远程信息 / 获取并整合进当前分支</td></tr><tr><td>origin / main / HEAD</td><td>远程别名 / 分支示例名 / 当前检出的引用</td></tr><tr><td>origin/main</td><td>本机最近 fetch 掌握的远程 main 位置</td></tr><tr><td>stash</td><td>仅本机的临时保存，不随 push 上传</td></tr><tr><td>Pull Request</td><td>请求合并分支，不等于 git pull</td></tr></table><p><a href="../lessons/0001-two-computers.html">返回短课</a> · <a href="../官方资料.md">官方资料</a> · <a href="https://git-scm.com/docs/git-pull">git pull 文档</a></p></main></html>

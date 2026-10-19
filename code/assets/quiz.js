@@ -1,0 +1,1 @@
+document.querySelectorAll('[data-answer]').forEach(q=>q.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{q.querySelector('output').textContent=b.dataset.value===q.dataset.answer?'正确：commit 只在本地，push 后另一台电脑才能从 GitHub 拉到。':'再想一想：保存、暂存和本地提交都不会自动传到 GitHub。';})));

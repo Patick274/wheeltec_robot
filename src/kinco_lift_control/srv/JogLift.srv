@@ -1,0 +1,6 @@
+# 有限相对步长，单位mm：正数上升、负数下降；绝对值受max_jog_mm限制。
+float64 distance_mm
+float64 speed_mm_s
+---
+bool accepted
+string message

@@ -1,0 +1,57 @@
+# ============================================================
+# all_control_command 说明
+# ============================================================
+
+# ---------- 这个目录是干什么的 ----------
+# 把"小车控制相关"的 launch 文件集中拷贝到 launch/ 下,
+# 不用记各个功能包的路径,进这一个目录就能启动所有常用功能。
+#
+# 用法: cd ~/wheeltec_robot/src/all_control_command/launch
+#       roslaunch <文件名>.launch [参数]
+#   (roslaunch 直接跟文件名即可,无需写包名)
+
+# ---------- launch/ 下各文件用途与常用参数 ----------
+# turn_on_wheeltec_robot.launch  ★ 底盘总启动(最先开)
+#     底盘串口节点 + twist_mux 速度仲裁 + TF/URDF + robot_pose_ekf
+#     参数: navigation:=true 时同时开导航; local_planner:=teb/dwa(默认 teb)
+# wheeltec_lidar.launch          雷达启动(默认 ls_M10_double 双 M10,
+#     驱动内合并为单路 /scan; 单雷达改 rplidar_mode:=ls_M10_single)
+# mapping.launch                 建图
+#     mapping_mode:=gmapping(默认) / karto(轻量备选) / cartographer(首选,
+#     需 ~/cartographer_ws 编译完成) / hector
+# navigation.launch              导航(需先建好图)
+#     map_file:=地图yaml路径(默认 turn_on_wheeltec_robot/map/third.yaml)
+#     local_planner:=teb(默认) / dwa(Jetson 负载高时切换)
+# rrt_slam.launch                rrt 自主探索建图(建图+导航同时开)
+# keyboard_teleop.launch         键盘控制(指令走 twist_mux 高优先级端)
+# joy_control.launch             手柄控制(同上,松手 0.5s 后导航自动接管)
+
+# ---------- 常用组合 ----------
+# 手动建图:   roslaunch mapping.launch
+#             (另开终端存图: rosrun map_server map_saver -f ~/map名)
+# 建图命令
+# 1）gmapping（默认，轮子里程计依赖，适合室内）
+#roslaunch all_control_command mapping.launch mapping_mode:=gmapping
+
+# 2）hector 激光无里程计建图，适合里程计不准场景
+#roslaunch all_control_command mapping.launch mapping_mode:=hector
+
+# 3）karto 图优化建图
+#roslaunch all_control_command mapping.launch mapping_mode:=karto
+
+# 4）cartographer谷歌建图（注意！必须先source cartographer编译后的环境）
+#roslaunch all_control_command mapping.launch mapping_mode:=cartographer
+
+# cartographer 存图: bash ~/wheeltec_robot/src/turn_on_wheeltec_robot/scripts/save_cartographer_map.sh 地图名
+# 导航:       roslaunch navigation.launch map_file:=~/wheeltec_robot/src/turn_on_wheeltec_robot/map/你的地图.yaml
+# 负载高时:   mapping.launch mapping_mode:=karto
+#             navigation.launch local_planner:=dwa
+
+# ---------- 重要维护提醒 ----------
+# 本目录是【拷贝件】,原件在:
+#   turn_on_wheeltec_robot/launch/  (前5个)
+#   wheeltec_robot_rc/launch/       (keyboard_teleop.launch)
+#   wheeltec_joy_control/launch/    (joy_control.launch)
+# 修改 launch 请改原件,再重新拷贝到本目录覆盖,否则两处会不同步。
+# 2026-09-03 拷贝时已包含: local_planner 三级透传、cartographer 组建图、
+# navigation.launch 的 default→value 修复。

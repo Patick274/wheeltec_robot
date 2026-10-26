@@ -18,7 +18,7 @@
 
 文档信息:
   名称: "kinco_lift_control 升降控制包使用与文件解析"
-  更新日期: "2026-10-19"
+  更新日期: "2026-10-18"
   用途: "配合源码中文注释，理解程序、编译运行、配置标定和排查问题"
   运行参数文件: "config/lift.yaml"
   注意: "不要把explain.yaml作为lift.launch的config参数；它不是运行配置。"
@@ -26,15 +26,13 @@
 一_适用环境与连接:
   软件:
     系统: "Ubuntu 20.04"
-    ROS: "ROS1 Noetic，Python3；按当前PHM的catkin工程组织"
+    ROS: "ROS1 Noetic，Python3；按当前wheeltec_robot的catkin工程组织"
     主机: "Jetson Xavier系列；实际板卡型号以实物为准，程序使用Linux SocketCAN"
   已确定设备:
     驱动器: "步科FD125-AB-000"
     电机: "SMK60S-0040-30QAK-5DSA"
     机构: "HTL4升降机构，具体传动和可用行程仍需实测"
-    适配器: "隔离型USB-CAN，已购买Kvaser兼容固件；在Jetson验证SocketCAN，不限定candleLight。"
-    USB实测身份: "Windows报告Kvaser Leaf Light v2，VID/PID 0BFD:0120；不代表原厂硬件认证。"
-    Windows实测状态: "问题码28、无绑定驱动；尚不能据此判断Linux兼容性。"
+    适配器: "隔离型USB-CAN，预刷candleLight，由Linux gs_usb驱动识别"dd
   数据链路: "ROS服务 -> LiftController -> SdoClient -> SocketCAN -> USB-CAN -> FD125 -> 电机"
   供电说明: "CAN转换器负责通信；驱动器动力电源和逻辑电源仍须按接线要求独立接好。"
   X1A_CAN接线:
@@ -67,16 +65,6 @@
     作用: "独立只读探测工具，不依赖ROS节点运行或自定义服务生成。"
     数据: "读取6041、6063、606C、60FD、2601、6060并输出JSON。"
     说明: "不使能、不修改对象；退出后再启动正式控制节点。"
-  "scripts/diagnose_can.py":
-    作用: "Jetson只读诊断入口，不需要ROS，不发送CAN帧。"
-    用法: "python3 scripts/diagnose_can.py --interface can0；加--json可输出完整报告。"
-  "src/kinco_lift/diagnostics.py":
-    作用: "采集USB ID、绑定驱动、SocketCAN接口和内核模块信息，检查接口状态与波特率。"
-    限制: "不自动安装驱动、不加载模块、不配置网卡；就绪仅代表可继续做SDO探测。"
-  "tests/test_diagnostics.py":
-    作用: "诊断分支测试，覆盖缺接口、网口、vcan、DOWN、波特率错误、BUS-OFF和非Linux。"
-  "docs/KVASER_SOCKETCAN.md":
-    作用: "当前Kvaser兼容设备的Windows检查结论与Jetson分步接入指南。"
   "src/kinco_lift/canopen.py":
     作用: "CAN传输与CANopen报文层；与ROS及机械高度无关。"
     SocketCan: "打开Linux原始CAN套接字，封装经典CAN帧并接收错误帧。"
@@ -152,27 +140,27 @@
     - "排查后显式复位、使能并重新记录零点；不会自动恢复运动。"
 
 四_首次使用命令:
-  路径说明: "下面假设Jetson工作区为~/PHM；按实际路径替换。不要在Windows执行ROS命令。"
+  路径说明: "下面假设Jetson工作区为~/wheeltec_robot；按实际路径替换。不要在Windows执行ROS命令。"
   编译: |
     source /opt/ros/noetic/setup.bash
-    cd ~/PHM
+    cd ~/wheeltec_robot
     catkin_make -DPYTHON_EXECUTABLE=/usr/bin/python3
     source devel/setup.bash
   必要工具: |
     sudo apt update
     sudo apt install can-utils python3-setuptools python3-catkin-pkg
-    chmod +x ~/PHM/src/kinco_lift_control/scripts/*.py
+    chmod +x ~/wheeltec_robot/src/kinco_lift_control/scripts/*.py
   离线测试: |
-    cd ~/PHM/src/kinco_lift_control
+    cd ~/wheeltec_robot/src/kinco_lift_control
     python3 -m unittest discover -s tests -v
     python3 scripts/probe_drive.py --simulate
   模拟启动_终端一: |
     source /opt/ros/noetic/setup.bash
-    cd ~/PHM
+    cd ~/wheeltec_robot
     source devel/setup.bash
     roslaunch kinco_lift_control lift.launch simulate:=true
   模拟操作_终端二: |
-    cd ~/PHM
+    cd ~/wheeltec_robot
     source devel/setup.bash
     rosservice call /lift/enable "data: true"
     rosservice call /lift/reference_here "{}"
@@ -180,14 +168,7 @@
     rostopic echo /lift/status
   模拟操作说明: "rostopic echo持续显示；Ctrl+C结束查看，再执行其他命令。"
   配置实物CAN: |
-    # 第一步先采集，不修改网络接口，也不接电机运动。
-    python3 ~/PHM/src/kinco_lift_control/scripts/diagnose_can.py --interface can0
-    lsusb -d 0bfd:0120
-    ip -details link show
-    # 只有USB存在、接口缺失时检查候选驱动，错误信息需保留。
-    modinfo kvaser_usb
-    sudo modprobe can_raw
-    sudo modprobe kvaser_usb
+    sudo modprobe gs_usb
     ip -details link show
     # 确认can0对应升降转换器、没有被底盘或其他主站占用，再进行下面配置。
     sudo ip link set can0 down
@@ -195,7 +176,7 @@
     sudo ip link set can0 up
     ip -details -statistics link show can0
   实物先只读: |
-    cd ~/PHM
+    cd ~/wheeltec_robot
     source devel/setup.bash
     python3 src/kinco_lift_control/scripts/probe_drive.py --interface can0 --node-id 1
     roslaunch kinco_lift_control lift.launch
@@ -291,11 +272,11 @@
   到位判断: "服务accepted=true不是到位；需busy=false、无故障且位置符合目标，取消/停止不能当成正常完成。"
 
 八_常见问题:
-  "找不到kvaser_usb":
-    原因: "当前内核未提供模块、模块索引未就绪或相关支持为内建；需要结合接口和dmesg判断。"
-    处理: "有可用CAN接口时以接口为准；无接口时需匹配Jetson当前内核，不安装任意版本驱动。"
+  "找不到gs_usb":
+    原因: "Jetson内核未提供此模块，或适配器固件/型号不匹配。"
+    处理: "核对Jetson内核与适配器；安装Python包不能代替内核驱动。"
   "找不到can0":
-    处理: "运行diagnose_can.py；Kvaser兼容固件检查kvaser_usb候选驱动，candleLight检查gs_usb。"
+    处理: "检查USB识别、gs_usb和ip -details link show；不要把ttyUSB串口当CAN。"
   "SDO timeout":
     处理: "检查24V逻辑/动力供电、CAN_H/L/GND、站号、波特率、终端电阻及其他主站。"
     后续: "排查后重启本节点；不在不明结果下重复运动指令。"
@@ -318,22 +299,10 @@
     处理: "重新使能，并在下限位记录参考后再定位。"
 
 九_已验证与边界:
-  验证: "41项测试通过：31项控制/协议测试与10项只读诊断测试；尚未在Jetson/FD125实物验证。"
+  验证: "31项内存模拟测试通过；Python3.8语法和ROS启动XML检查通过。"
   尚未验证: "未在Jetson运行catkin/ROS、未与实际FD125或电机联调。"
   时序: "SDO轮询用于低频单轴梯形定位，不提供1kHz插补或多轴同步。"
   节点保护: "100C=200ms、100D=3、6007=1；约600ms是最后有效询问后的设定超时，不是整机急停响应保证。"
   不自动修改: "电机库、IO功能/极性、编码器、制动电阻、电池阈值、持久软限位及底盘启动文件。"
   模型衔接: "暂不发布升降joint_states；原URDF的arm_joint为fixed，后续需按实物建移动关节。"
   后续集成: "可将/lift/busy接入任务调度或twist_mux锁；本包目前仅检查停车并在检测到运动时停止升降。"
-
-十_Kvaser接入顺序:
-  原则: "保持SocketCAN控制代码；商家声称兼容尚需Jetson实测，不因Windows设备名就自动解锁运动。"
-  第一步: "USB单独插Jetson，运行diagnose_can.py、lsusb，确认是否有0BFD:0120。"
-  第二步: "检查ip -details link show；没有CAN接口时再检查kvaser_usb和dmesg。"
-  第三步: "确定正确接口后配置500000bit/s，不能覆盖底盘正在使用的其他CAN接口。"
-  第四步: "接FD125并使用probe_drive.py读取状态，成功后再启动默认只读ROS节点。"
-  Linux反馈命令: |
-    uname -r
-    python3 ~/PHM/src/kinco_lift_control/scripts/diagnose_can.py --interface can0 --json
-    sudo dmesg | tail -n 60
-  问题反馈: "将以上输出发给协助调试者；不要提供密码，不需要安装Windows驱动去修复Jetson。"

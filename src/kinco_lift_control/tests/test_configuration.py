@@ -33,6 +33,25 @@ def flat_config(path):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_lift_text_files_use_lf(self):
+        extensions = {'.py', '.launch', '.yaml', '.yml', '.srv', '.xml', '.md', '.txt'}
+        special = {'.gitattributes', '.gitignore', '.editorconfig'}
+        for path in ROOT.rglob('*'):
+            if path.is_file() and (path.suffix in extensions or path.name in special):
+                with self.subTest(path=str(path.relative_to(ROOT))):
+                    self.assertNotIn(b'\r', path.read_bytes(), 'Use LF, not CRLF/CR.')
+        self.assertIn('end_of_line = lf', (ROOT / '.editorconfig').read_text())
+
+    def test_modified_chassis_files_use_lf(self):
+        chassis = ROOT.parent / 'turn_on_wheeltec_robot'
+        if not chassis.exists():
+            self.skipTest('Sibling chassis package not available.')
+        for name in ('CMakeLists.txt', 'src/wheeltec_robot.cpp', 'include/wheeltec_robot.h',
+                     'include/lift_motion_gate.h', 'test/lift_motion_gate_test.cpp',
+                     'launch/include/base_serial.launch', '.gitattributes', '.editorconfig'):
+            with self.subTest(path=name):
+                self.assertNotIn(b'\r', (chassis / name).read_bytes(), 'Use LF, not CRLF/CR.')
+
     def test_physical_stays_locked_and_uses_confirmed_scaling(self):
         cfg = LiftConfig(flat_config(ROOT / 'config/lift.yaml'))
         self.assertFalse(cfg.motion_enabled)

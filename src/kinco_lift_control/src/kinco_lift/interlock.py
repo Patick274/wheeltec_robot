@@ -1,4 +1,4 @@
-"""底盘停车软件检查：要求里程计新鲜、速度接近零并持续达到指定时间。
+"""底盘反馈健康检查及停车/移动状态；移动可限速，反馈异常仍禁止升降。
 
 这里只决定是否允许升降，不发布底盘速度，也不能阻止其他节点驱动车轮。
 """
@@ -16,13 +16,15 @@ class ParkingInterlock:
         self.dwell = float(stationary_s)
         self.linear = float(linear_threshold)
         self.angular = float(angular_threshold)
-        if min(self.timeout, self.dwell, self.linear, self.angular) <= 0:
+        if not all(math.isfinite(v) and v > 0 for v in
+                   (self.timeout, self.dwell, self.linear, self.angular)):
             raise ValueError('Parking interlock thresholds/times must be positive.')
         self.lock = threading.Lock()
         self.odom_time = None
         self.stationary_since = None
         self.command_moving = False
         self.invalid_command = False
+        self.invalid_odometry = False
 
     def _moving(self, vx, vy, wz):
         """返回True/False；NaN等非法反馈返回None，按不安全状态处理。"""
@@ -39,6 +41,7 @@ class ParkingInterlock:
             if self.odom_time is None or now - self.odom_time > self.timeout:
                 self.stationary_since = None
             self.odom_time = now
+            self.invalid_odometry = moving is None
             if moving is False:
                 if self.stationary_since is None:
                     self.stationary_since = now
@@ -62,8 +65,33 @@ class ParkingInterlock:
         with self.lock:
             if self.odom_time is None or now - self.odom_time > self.timeout:
                 return 'Chassis odometry missing/stale; park chassis and start its odometry node.'
+            if self.invalid_odometry:
+                return 'Chassis odometry is non-finite/invalid.'
             if self.invalid_command or self.command_moving:
                 return 'Chassis velocity command is nonzero/invalid.'
             if self.stationary_since is None or now - self.stationary_since < self.dwell:
                 return 'Chassis has not remained stationary long enough.'
         return ''
+
+    def health_reason(self):
+        """允许边走边低速升降时，仅反馈健康异常是禁止条件。"""
+        if not self.required:
+            return ''
+        with self.lock:
+            if self.odom_time is None or time.monotonic() - self.odom_time > self.timeout:
+                return 'Chassis odometry missing/stale; lift motion prohibited.'
+            if self.invalid_odometry or self.invalid_command:
+                return 'Chassis odometry/command is non-finite/invalid.'
+        return ''
+
+    def speed_limit_rpm(self, stationary_rpm, moving_rpm):
+        """实测运动、非零底盘命令或停车尚未稳定，均采用移动限速。"""
+        if not self.required:
+            return stationary_rpm  # 只用于明确的内存模拟。
+        now = time.monotonic()
+        with self.lock:
+            stable = (self.odom_time is not None and now - self.odom_time <= self.timeout
+                      and not self.invalid_odometry and not self.invalid_command
+                      and not self.command_moving and self.stationary_since is not None
+                      and now - self.stationary_since >= self.dwell)
+        return stationary_rpm if stable else moving_rpm

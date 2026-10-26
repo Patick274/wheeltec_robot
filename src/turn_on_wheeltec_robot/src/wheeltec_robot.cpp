@@ -1,6 +1,16 @@
 #include "wheeltec_robot.h"
 #include "Quaternion_Solution.h"
 
+namespace {
+double lift_steady_now() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+std::uint64_t lift_session_seed() {
+  return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+}
+
 sensor_msgs::Imu Mpu6050;//Instantiate an IMU object //实例化IMU对象 
 
 /**************************************
@@ -46,6 +56,34 @@ Function: The speed topic subscription Callback function, according to the subsc
 ***************************************/
 void turn_on_robot::Cmd_Vel_Callback(const geometry_msgs::Twist &twist_aux)
 {
+  std::lock_guard<std::mutex> lock(lift_gate_mutex);
+  lift_gate.command({{twist_aux.linear.x, twist_aux.linear.y, twist_aux.angular.z}}, lift_steady_now());
+}
+
+void turn_on_robot::Lift_Permit_Callback(const std_msgs::UInt64 &msg)
+{
+  std::lock_guard<std::mutex> lock(lift_gate_mutex);
+  lift_gate.permit(msg.data, lift_steady_now());
+}
+
+void turn_on_robot::Lift_Gate_Tick(const ros::WallTimerEvent &)
+{
+  std::lock_guard<std::mutex> lock(lift_gate_mutex);
+  const double now = lift_steady_now();
+  lift_gate.tick(now);
+  std_msgs::UInt64 request;
+  request.data = lift_gate.request_id();
+  lift_request_pub.publish(request);
+  const LiftMotionGate::Velocity velocity = lift_gate.output(now);
+  geometry_msgs::Twist command;
+  command.linear.x = velocity[0];
+  command.linear.y = velocity[1];
+  command.angular.z = velocity[2];
+  Send_Base_Command(command);  // 未获许可/过期时持续下发零速，不沿用旧速度。
+}
+
+void turn_on_robot::Send_Base_Command(const geometry_msgs::Twist &twist_aux)
+{
   short  transition;  //intermediate variable //中间变量
 
   Send_Data.tx[0]=FRAME_HEADER; //frame head 0x7B //帧头0X7B
@@ -79,7 +117,7 @@ void turn_on_robot::Cmd_Vel_Callback(const geometry_msgs::Twist &twist_aux)
   {
     Stm32_Serial.write(Send_Data.tx,sizeof (Send_Data.tx)); //Sends data to the downloader via serial port //通过串口向下位机发送数据 
   }
-  catch (serial::IOException& e)   
+  catch (const std::exception& e)
   {
     ROS_ERROR_STREAM("Unable to send data through serial port"); //If sending data fails, an error message is printed //如果发送数据失败，打印错误信息
   }
@@ -424,7 +462,10 @@ void turn_on_robot::Control()
     if (true == Get_Sensor_Data_New()) //The serial port reads and verifies the data sent by the lower computer, and then the data is converted to international units
                                    //通过串口读取并校验下位机发送过来的数据，然后数据转换为国际单位
     {
-      
+      {
+        std::lock_guard<std::mutex> lock(lift_gate_mutex);
+        lift_gate.feedback({{Robot_Vel.X, Robot_Vel.Y, Robot_Vel.Z}}, lift_steady_now());
+      }
 
       Robot_Pos.X+=(Robot_Vel.X * cos(Robot_Pos.Z) - Robot_Vel.Y * sin(Robot_Pos.Z)) * Sampling_Time; //Calculate the displacement in the X direction, unit: m //计算X方向的位移，单位：m
       Robot_Pos.Y+=(Robot_Vel.X * sin(Robot_Pos.Z) + Robot_Vel.Y * cos(Robot_Pos.Z)) * Sampling_Time; //Calculate the displacement in the Y direction, unit: m //计算Y方向的位移，单位：m
@@ -476,7 +517,16 @@ turn_on_robot::turn_on_robot():Sampling_Time(0),Power_voltage(0)
 
   //Set the velocity control command callback function
   //速度控制命令订阅回调函数设置
-  Cmd_Vel_Sub     = n.subscribe("cmd_vel",     100, &turn_on_robot::Cmd_Vel_Callback, this); 
+  lift_gate = LiftMotionGate(lift_session_seed());
+  ros::NodeHandle gate_nh(n);
+  gate_nh.setCallbackQueue(&lift_callback_queue);
+  std::string request_topic, permit_topic;
+  private_nh.param<std::string>("lift_request_topic", request_topic, "/lift/base_motion_request");
+  private_nh.param<std::string>("lift_permit_topic", permit_topic, "/lift/base_motion_permit");
+  lift_request_pub = gate_nh.advertise<std_msgs::UInt64>(request_topic, 1, false);
+  lift_permit_sub = gate_nh.subscribe(permit_topic, 1, &turn_on_robot::Lift_Permit_Callback, this);
+  Cmd_Vel_Sub = gate_nh.subscribe("cmd_vel", 1, &turn_on_robot::Cmd_Vel_Callback, this);
+  lift_gate_timer = gate_nh.createWallTimer(ros::WallDuration(0.05), &turn_on_robot::Lift_Gate_Tick, this);
 
   ROS_INFO_STREAM("Data ready"); //Prompt message //提示信息
   
@@ -489,7 +539,7 @@ turn_on_robot::turn_on_robot():Sampling_Time(0),Power_voltage(0)
     Stm32_Serial.setTimeout(_time);
     Stm32_Serial.open(); //Open the serial port //开启串口
   }
-  catch (serial::IOException& e)
+  catch (const std::exception& e)
   {
     ROS_ERROR_STREAM("wheeltec_robot can not open serial port,Please check the serial port cable! "); //If opening the serial port fails, an error message is printed //如果开启串口失败，打印错误信息
   }
@@ -497,6 +547,8 @@ turn_on_robot::turn_on_robot():Sampling_Time(0),Power_voltage(0)
   {
     ROS_INFO_STREAM("wheeltec_robot serial port opened"); //Serial port opened successfully //串口开启成功提示
   }
+  lift_spinner.reset(new ros::AsyncSpinner(1, &lift_callback_queue));
+  lift_spinner->start();
 }
 /**************************************
 Date: January 28, 2021
@@ -505,6 +557,9 @@ Function: Destructor, executed only once and called by the system when an object
 ***************************************/
 turn_on_robot::~turn_on_robot()
 {
+  lift_gate_timer.stop();
+  if (lift_spinner) lift_spinner->stop();
+  // 不发送释放请求；退出时底盘可能尚未停稳，升降侧必须保留100rpm限制。
   //Sends the stop motion command to the lower machine before the turn_on_robot object ends
   //对象turn_on_robot结束前向下位机发送停止运动命令
   Send_Data.tx[0]=FRAME_HEADER;
@@ -528,7 +583,7 @@ turn_on_robot::~turn_on_robot()
   {
     Stm32_Serial.write(Send_Data.tx,sizeof (Send_Data.tx)); //Send data to the serial port //向串口发数据  
   }
-  catch (serial::IOException& e)   
+  catch (const std::exception& e)
   {
     ROS_ERROR_STREAM("Unable to send data through serial port"); //If sending data fails, an error message is printed //如果发送数据失败,打印错误信息
   }

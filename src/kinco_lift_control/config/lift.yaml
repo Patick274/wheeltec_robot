@@ -8,31 +8,53 @@ poll_hz: 10.0
 motion_enabled: false  # 总运动许可；启动时依然不会自动使能。
 commissioning_confirmed: false
 # 需实测两个方向的硬件限位、驱动器输入功能和极性。
-# 当前只有下限位时应保持false，软件参数不能替代缺少的上限位。
+# 2026-10-26用户已反馈双向硬限位有效；ROS/CAN实机保护仍待验收，暂不放行。
 drive_limits_verified: false
 
-# KS3有效反馈精度，单位inc/电机转；不是编码器铭牌位数，未知时保持0。
-# 不可直接照抄手册示例65536；实际值应通过KS3或厂家确认。
-encoder_counts_per_rev: 0
-# 电机每转对应机构实际伸长毫米数。图纸候选36/16=2.25，
-# 实际传动和多级伸缩倍率必须核实，未知时保持0。
-mm_per_motor_rev: 0.0
+# Windows实际参数已读到65536 inc/电机转；Jetson首次接入仍需回读核对。
+encoder_counts_per_rev: 65536
+# 图纸36/16=2.25mm/电机转，与4190mm全行程计数实测吻合，暂用此换算。
+mm_per_motor_rev: 2.25
 # 6063计数增大对应上升填+1，计数减小对应上升填-1。
 up_direction: 1
 # 图纸行程4200mm；软件允许行程需实测并留余量，未确认时保持0。
-travel_mm: 0.0
+# 4190mm是实测跨度候选；正常位置目标还受两端5mm内缩边界约束。
+travel_mm: 4190.0
+# 从地面到下限位静止时顶端的总高度（米），测量后填写；未知不能填0代替。
+initial_top_height_m: null
 
 # 以下是本程序的保守默认值，不是厂家的机械性能保证。
-max_speed_mm_s: 5.0
-max_motor_rpm: 200.0
-acceleration_rps_s: 1.0
-quick_stop_deceleration_rps_s: 2.0
+max_speed_mm_s: 37.5
+max_motor_rpm: 1000.0
+acceleration_rps_s: 100.0
+quick_stop_deceleration_rps_s: 610.0
 max_jog_mm: 1.0
-motion_timeout_s: 30.0
+motion_timeout_s: 110.0
 position_tolerance_mm: 0.2
 
-# 实物必须保留停车检查；下面话题需与底盘实际发布/订阅名称对应。
-require_base_stationary: true
+# 独立开关：写好配置不等于允许实机运行；仍需上方三项许可和每会话c确认。
+keyboard_control_enabled: false
+speed_zones_enabled: true
+keyboard_cruise_rpm: 1000.0
+keyboard_approach_rpm: 100.0
+# 当前原始坐标系，不能在重新回原/清编码器后继续沿用。
+keyboard_lower_position_counts: 147599
+keyboard_upper_position_counts: 122303105
+keyboard_down_slow_counts: 3060000
+keyboard_up_slow_counts: 119390000
+# 正常终点暂向行程内部缩5mm，硬限位作为后备；此余量仍须实机验收。
+keyboard_stop_margin_mm: 5.0
+keyboard_reference_tolerance_mm: 1.0
+keyboard_command_timeout_s: 0.4
+# 2分钟运行/18分钟停止的保守辅助限制：进程累计110秒后停机，静止18分钟恢复。
+# 短暂停顿/松键/复位不清预算。进程重启不证明冷却完成，仍需现场履行工作制。
+motion_budget_s: 110.0
+motion_cooldown_s: 1080.0
+
+# 实物必须保留反馈健康检查；非零底盘命令/实测运动时限速100rpm。
+require_base_feedback: true
+allow_lift_while_base_moving: true
+base_moving_max_rpm: 100.0
 base_odom_topic: /odom
 base_command_topic: /cmd_vel
 odom_timeout_s: 0.5

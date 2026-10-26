@@ -35,3 +35,11 @@ include_directories(include/${PROJECT_NAME})
 
 add_executable(wheeltec_robot_node src/wheeltec_robot.cpp src/Quaternion_Solution.cpp)
 target_link_libraries(wheeltec_robot_node ${catkin_LIBRARIES})
+
+# Pure C++ safety policy tests; no serial port, ROS master or motor access.
+if(CATKIN_ENABLE_TESTING)
+  add_executable(lift_motion_gate_test test/lift_motion_gate_test.cpp)
+  foreach(case wait_for_permit permit_timeout command_timeout feedback_timeout zero_and_cooldown tiny_command invalid_command old_process uncommanded_motion)
+    add_test(NAME lift_gate_${case} COMMAND lift_motion_gate_test ${case})
+  endforeach()
+endif()

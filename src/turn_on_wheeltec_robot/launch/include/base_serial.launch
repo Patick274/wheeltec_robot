@@ -13,6 +13,9 @@
   </node>
 
   <node pkg="turn_on_wheeltec_robot" type="wheeltec_robot_node" name="wheeltec_robot" output="screen" respawn="false">
+    <!-- 强制升降低速许可；lift节点缺失/故障/许可过期时发送底盘零速，不可仅更新单个包。 -->
+    <param name="lift_request_topic" type="string" value="/lift/base_motion_request"/>
+    <param name="lift_permit_topic" type="string" value="/lift/base_motion_permit"/>
     <param name="usart_port_name"    type="string" value="/dev/wheeltec_controller"/>  
     <param name="serial_baud_rate"   type="int"    value="115200"/>
     <param name="odom_frame_id"      type="string" value="$(arg odom_frame_id)"/> 

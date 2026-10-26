@@ -13,9 +13,10 @@ import time
 import rospy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import Bool, Float64, Int8, String, UInt64
 from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
 from kinco_lift_control.srv import MoveLift, MoveLiftResponse, JogLift, JogLiftResponse
+from kinco_lift_control.srv import MoveTopHeight, MoveTopHeightResponse
 from kinco_lift.canopen import CanError, SdoClient, SocketCan
 from kinco_lift.controller import LiftConfig, LiftController, LiftError
 from kinco_lift.interlock import ParkingInterlock
@@ -28,10 +29,17 @@ class LiftNode:
         params = rospy.get_param('~', {})
         self.simulate = bool(params.get('simulate', False))
         self.cfg = LiftConfig(params)
-        if not self.simulate and not params.get('require_base_stationary', True):
-            raise LiftError('Physical operation requires require_base_stationary=true.')
+        require_feedback = bool(params.get('require_base_feedback', params.get('require_base_stationary', True)))
+        if not self.simulate and not require_feedback:
+            raise LiftError('Physical operation requires fresh chassis feedback.')
+        self.allow_moving = bool(params.get('allow_lift_while_base_moving', True))
+        self.base_motion_requested = False
+        # 自动底盘请求与人工服务分开；心跳丢失撤销许可，但不释放100rpm限制。
+        self.base_auto_hold = False
+        self.base_request_id = 0
+        self.base_request_time = None
         self.parking = ParkingInterlock(
-            required=bool(params.get('require_base_stationary', True)),
+            required=require_feedback,
             odom_timeout=params.get('odom_timeout_s', 0.5),
             stationary_s=params.get('base_stationary_s', 1),
             linear_threshold=params.get('base_linear_threshold_m_s', 0.01),
@@ -39,19 +47,32 @@ class LiftNode:
         node_id = int(params.get('node_id', 1))
         # simulate是明确的传输层选择；真实模式不会用模拟标定值填补未知参数。
         transport = (SimulatedCan(node_id, self.cfg.counts or 65536,
-                                  self.cfg.mm_rev or 2.25, self.cfg.travel or 200, self.cfg.direction)
+                                  self.cfg.mm_rev or 2.25,
+                                  ((self.cfg.zones.upper - self.cfg.zones.lower) * self.cfg.mm_rev / self.cfg.counts
+                                   if self.cfg.zones else self.cfg.travel or 200), self.cfg.direction,
+                                  self.cfg.zones.lower if self.cfg.zones else 0)
                      if self.simulate else SocketCan(params.get('can_interface', 'can0')))
         sdo = SdoClient(transport, node_id, float(params.get('sdo_timeout_s', 0.15)))
-        self.axis = LiftController(sdo, self.cfg, self.parking.reason)
+        self.axis = LiftController(sdo, self.cfg,
+                                   self.parking.health_reason if self.allow_moving else self.parking.reason,
+                                   self.current_speed_cap)
         self.action_lock = threading.RLock()  # ROS服务线程与轮询线程共享同一控制轴。
         self.closing = False
         self.status_pub = rospy.Publisher('~status', String, queue_size=1, latch=True)
         self.height_pub = rospy.Publisher('~position_mm', Float64, queue_size=1)
+        self.top_height_pub = rospy.Publisher('~top_height_m', Float64, queue_size=1)
+        # 不锁存；底盘必须同时检查消息新鲜度，节点退出不能沿用旧许可。
+        self.base_permission_pub = rospy.Publisher('~base_motion_permitted', Bool, queue_size=1)
+        self.base_permit_pub = rospy.Publisher('~base_motion_permit', UInt64, queue_size=1)
         self.busy_pub = rospy.Publisher('~busy', Bool, queue_size=1, latch=True)
         self.odom_sub = rospy.Subscriber(params.get('base_odom_topic', '/odom'),
                                          Odometry, self.odom_cb, queue_size=1)
         self.cmd_sub = rospy.Subscriber(params.get('base_command_topic', '/cmd_vel'),
                                         Twist, self.cmd_cb, queue_size=1)
+        self.base_request_sub = rospy.Subscriber('~base_motion_request', UInt64,
+                                                 self.base_request_cb, queue_size=1, tcp_nodelay=True)
+        self.keyboard_sub = rospy.Subscriber('~keyboard_command', Int8,
+                                             self.keyboard_cb, queue_size=1, tcp_nodelay=True)
         # 私有名称~会随launch中的节点名lift展开为/lift/enable等。
         self.services = [
             rospy.Service('~enable', SetBool, self.enable),
@@ -59,7 +80,13 @@ class LiftNode:
             rospy.Service('~reset_fault', Trigger, self.reset),
             rospy.Service('~reference_here', Trigger, self.reference),
             rospy.Service('~move', MoveLift, self.move),
-            rospy.Service('~jog', JogLift, self.jog)]
+            rospy.Service('~jog', JogLift, self.jog),
+            rospy.Service('~enable_keyboard', SetBool, self.enable_keyboard),
+            rospy.Service('~confirm_keyboard_coordinates', Trigger, self.confirm_keyboard),
+            rospy.Service('~keyboard_stop', Trigger, self.keyboard_stop)]
+        self.services.extend([
+            rospy.Service('~move_top_height', MoveTopHeight, self.move_top_height),
+            rospy.Service('~request_base_motion', SetBool, self.request_base_motion)])
         self.poll_hz = float(params.get('poll_hz', 10))
         if not math.isfinite(self.poll_hz) or not 5 <= self.poll_hz <= 20:
             raise LiftError('poll_hz must be between 5 and 20.')
@@ -73,10 +100,61 @@ class LiftNode:
         """底盘实测速度回调；默认订阅现有底盘发布的/odom。"""
         t = msg.twist.twist
         self.parking.odometry(t.linear.x, t.linear.y, t.angular.z)
+        self._run(self.axis.apply_speed_limits)
 
     def cmd_cb(self, msg):
-        """底盘速度命令回调；发现非零命令，不等待车轮真正转动才禁止升降。"""
+        """非零底盘命令立即请求100rpm上限，不等车轮已经开始转动。"""
         self.parking.command(msg.linear.x, msg.linear.y, msg.angular.z)
+        self._run(self.axis.apply_speed_limits)
+
+    def current_speed_cap(self):
+        if self.base_motion_requested or self.base_auto_hold:
+            return min(self.cfg.max_rpm, self.cfg.moving_max_rpm)
+        return self.parking.speed_limit_rpm(self.cfg.max_rpm, self.cfg.moving_max_rpm)
+
+    def base_request_cb(self, msg):
+        """非零序号持续申请低速许可；0只有在底盘确认停稳后才释放自动限速。"""
+        def request():
+            self.base_request_id = int(msg.data)
+            self.base_request_time = time.monotonic()
+            if self.base_request_id:
+                self.base_auto_hold = True
+            elif not self.parking.reason():
+                self.base_auto_hold = False
+            self.axis.apply_speed_limits()
+        self._run(request)
+
+    def base_permit_id(self, status):
+        if (not self.base_request_id or self.base_request_time is None or
+                time.monotonic() - self.base_request_time > 0.3):
+            return 0
+        return self.base_request_id if self.base_permission(status) else 0
+
+    def request_base_motion(self, req):
+        def request():
+            self.base_motion_requested = bool(req.data)
+            self.axis.apply_speed_limits()
+            self.axis.poll()  # 返回许可前必须重新读取实际速度，不能沿用旧的静止读数。
+        with self.action_lock:
+            accepted, message = self._run(request)
+            if accepted and req.data:
+                ready = self.base_permission(self.axis.status())
+                return SetBoolResponse(ready, 'Base motion permitted under retained 100rpm cap.' if ready else
+                                       '100rpm cap requested, but actual speed/health is not ready; do not drive, retry later.')
+            return SetBoolResponse(accepted, message)
+
+    def base_permission(self, status):
+        if self.cfg.counts <= 0:
+            return False
+        auto_fresh = (self.base_auto_hold and self.base_request_id and self.base_request_time is not None
+                      and time.monotonic() - self.base_request_time <= 0.3)
+        requested_rpm = abs(status['commanded_rpm']) if self.axis.control_mode == 3 else status['profile_rpm']
+        return bool((self.base_motion_requested or auto_fresh) and status['connected'] and not status['error_status']
+                    and not status['error_status2'] and not status['stop_latched']
+                    and not self.parking.health_reason()
+                    and abs(status['velocity_raw']) <= self.cfg.velocity_raw(self.cfg.moving_max_rpm)
+                    and requested_rpm <= self.cfg.moving_max_rpm
+                    and (self.allow_moving or not status['enabled']))
 
     def _run(self, operation):
         """统一串行服务入口；请求失败时返回原因，已使能轴会进入停机锁定。"""
@@ -100,6 +178,20 @@ class LiftNode:
         """Trigger：人工复位故障和停止锁存，同时撤销会话零点。"""
         return TriggerResponse(*self._run(self.axis.reset))
 
+    def enable_keyboard(self, req):
+        return SetBoolResponse(*self._run(
+            (lambda: self.axis.enable(keyboard=True)) if req.data else self.axis.disable))
+
+    def confirm_keyboard(self, req):
+        return TriggerResponse(*self._run(self.axis.confirm_keyboard_coordinates))
+
+    def keyboard_stop(self, req):
+        ok, message = self._run(self.axis.operator_halt)
+        return TriggerResponse(ok, 'Halt requested; confirm actual standstill in /lift/status.' if ok else message)
+
+    def keyboard_cb(self, msg):
+        self._run(lambda: self.axis.keyboard_command(msg.data))
+
     def reference(self, req):
         """Trigger：静止下限位处记零；不是自动找下限位。"""
         return TriggerResponse(*self._run(self.axis.reference_here))
@@ -112,6 +204,9 @@ class LiftNode:
         """JogLift：distance_mm正数上升、负数下降，一次只执行有限步长。"""
         return JogLiftResponse(*self._run(lambda: self.axis.move(req.distance_mm, req.speed_mm_s, jog=True)))
 
+    def move_top_height(self, req):
+        return MoveTopHeightResponse(*self._run(lambda: self.axis.move_top_height(req.target_height_m)))
+
     def stop(self, req):
         """停机回执只说明通信写入结果，实际停稳继续看status/busy。"""
         with self.action_lock:
@@ -123,12 +218,28 @@ class LiftNode:
     def publish(self):
         """JSON包含计数、参考、故障与限位；未知毫米高度为null，暂不发布高度话题。"""
         status = self.axis.status()
+        actual_limit = (self.cfg.velocity_raw(self.cfg.moving_max_rpm) if self.cfg.counts > 0 else None)
+        base_permitted = self.base_permission(status)
         status.update(simulate=self.simulate, motion_allowed=self.cfg.motion_enabled,
-                      parking_interlock=self.parking.reason())
+                      parking_interlock=(self.parking.health_reason() if self.allow_moving else self.parking.reason()),
+                      base_speed_limit_rpm=self.current_speed_cap(),
+                      base_motion_requested=self.base_motion_requested,
+                      base_auto_hold=self.base_auto_hold,
+                      base_request_id=self.base_request_id,
+                      base_motion_permitted=base_permitted,
+                      base_speed_violation=bool(actual_limit is not None
+                                                and self.current_speed_cap() <= self.cfg.moving_max_rpm
+                                                and abs(status['velocity_raw']) > actual_limit))
         self.status_pub.publish(String(data=json.dumps(status, allow_nan=False)))
         self.busy_pub.publish(Bool(data=status['busy']))
+        self.base_permission_pub.publish(Bool(data=base_permitted))
+        self.base_permit_pub.publish(UInt64(data=self.base_permit_id(status)))
+        if status['base_speed_violation']:
+            rospy.logwarn_throttle(1.0, 'Chassis moving/requested while lift is decelerating above 100rpm. Base must honor permission.')
         if status['position_mm'] is not None:
             self.height_pub.publish(Float64(data=status['position_mm']))
+        if status['top_height_m'] is not None:
+            self.top_height_pub.publish(Float64(data=status['top_height_m']))
 
     def run(self):
         # 用单调墙钟，不依赖ROS /clock；仿真时钟暂停不能让通信监督虚假续期。

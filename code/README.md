@@ -1,7 +1,17 @@
-# GitHub / PHM 双机协作学习包
+# GitHub / wheeltec_robot 双机协作学习包
 
 重点解决两台电脑轮流修改同一仓库：拉取、提交、推送、交接、分叉与冲突。
 教程为人工执行的步骤，命令示例不等于本次已执行；遇到错误先停止。
+
+## 当前优先使用：A/B 简明版
+
+- **[4 页 PDF：A/B 两机上传与下拉](output/pdf/GitHub_AB两机上传下拉简明手册.pdf)**。
+- **[配套 Markdown：可复制完整步骤](03_另一台电脑拉取与上传/GitHub_AB两机同步简明流程.md)**。
+- [本次真实报错与处理顺序](04_常见问题/13_本次实际问题与处理.md)。
+
+实际仓库 Patick274/wheeltec_robot；远程别名 origin，目标分支 main。
+A 为 Windows，本地目录仍叫 PHM；B 为 Linux，使用系统终端 Git + SSH，无需登录 GitHub 插件。
+原 19 页长版保留作界面与原理参考，其中 YOUR-USER/PHM 为通用示意。
 
 ## 从这里开始
 
@@ -37,11 +47,11 @@
 
 ## 使用边界与验证
 
-日期：2026-10-19。未提供真实 PHM GitHub URL，PDF 中的 YOUR-USER/PHM 是明确标注的界面示意。
-没有修改账户、仓库设置、密钥或 Git 配置，也没有执行实际推送、移动仓库或清理历史。
-本机 PHM 仓库的 Git 元数据读取受当前环境限制，无法据此确认实际分支与远程地址；示例 main 必须按实际情况替换。
-来源与核对范围见 [官方资料](官方资料.md)；生成源码为 build_github_guide.py。
-PDF 已进行文本、分页与渲染核对；教程的双机核心流程另在隔离的本地演示仓库验证，结果见 [验证记录](验证记录.md)。
+日期：2026-10-19。用户已提供真实 wheeltec_robot 地址，Windows 的 main 与远程配置曾只读核实。
+本次只更新 code 内学习文件，不执行 merge/abort、commit/push，也不修改账户、密钥或仓库配置。
+不据此宣称最终上传或 Linux 端认证、clone 已成功。旧长版为 PHM 示意，新简明版使用实际地址。
+来源见 [官方资料](官方资料.md)；简明版源码为 build_github_ab_brief.py，长版源码为 build_github_guide.py。
+新 PDF 检查见 [A/B 简明版校验记录](GitHub_AB简明版校验记录.md)；早前 Git 演练见 [验证记录](验证记录.md)。
 
 ---
 

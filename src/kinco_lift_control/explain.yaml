@@ -1,4 +1,21 @@
 # 阅读说明，不是rosparam运行配置；不需要编译、执行或加载本文件。
+# 2026-10-26新增方向键/分区配速，以下旧章节未逐条覆盖新功能，请优先阅读docs/KEYBOARD_CONTROL.md。
+# 同日追加底盘运动100rpm限速和顶端总高度m服务，优先阅读docs/BASE_HEIGHT_CONTROL.md。
+底盘与顶端高度更新:
+  新说明: "docs/BASE_HEIGHT_CONTROL.md"
+  移动底盘上限: "100rpm；反馈丢失或非法仍停止，严格实际限速需底盘先握手获准再起步"
+  新服务: "/lift/move_top_height，target_height_m为目标顶端总高度m，不是增量"
+  待填参数: "initial_top_height_m，机器人在会话下限位零点时顶端距地面的实测总高度"
+  初始高度未知: "保持null，只拒绝顶端高度服务，不伪造0m"
+
+键盘控制更新:
+  日期: "2026-10-26"
+  入口: "scripts/lift_keyboard.py；Linux终端rosrun，↑上升、↓下降、空格停车"
+  新说明: "docs/KEYBOARD_CONTROL.md"
+  配速: "中段1000rpm，下降至3060000inc或上升至119390000inc降为100rpm"
+  边界: "只改本地代码；默认不放行实机，未连接或部署Jetson"
+  新测试: "tests/test_keyboard.py"
+
 文档信息:
   名称: "kinco_lift_control 升降控制包使用与文件解析"
   更新日期: "2026-10-19"

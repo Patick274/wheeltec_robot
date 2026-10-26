@@ -1,0 +1,6 @@
+# 目标顶端总高度（米），不是增量。伸长量=(target_height_m-initial_top_height_m)*1000 mm。
+float64 target_height_m
+---
+# 仅表示目标已接受/下发，不代表到位；观察/lift/status。
+bool accepted
+string message

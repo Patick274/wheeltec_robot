@@ -948,5 +948,7 @@ def pdf():
     print(f'PDF written: {OUT} ({PAGE} pages)')
 
 if __name__=='__main__':
-    docs()
+    # 默认只重建长版 PDF，避免覆盖已按真实问题修订的 Markdown。
+    if '--regenerate-generic-docs' in sys.argv:
+        docs()
     pdf()

@@ -13,13 +13,15 @@ from .canopen import CanError
 
 class SimulatedCan:
     """与SocketCan具有相同send/recv/close接口，可替换传输层进行测试。"""
-    def __init__(self, node_id=1, counts=65536, mm_rev=2.25, travel_mm=200, direction=1):
+    def __init__(self, node_id=1, counts=65536, mm_rev=2.25, travel_mm=200, direction=1,
+                 lower_counts=0):
         self.node_id = node_id
         self.counts = counts
         self.mm_rev = mm_rev
         self.direction = direction
         self.maximum = travel_mm * counts / mm_rev
-        self.position = 0.0
+        self.lower_counts = lower_counts
+        self.position = float(lower_counts)
         self.target = 0
         self.moving = False
         self.enabled = False
@@ -35,16 +37,20 @@ class SimulatedCan:
         self.od = {
             (0x6040, 0): [2, False, 6], (0x6041, 0): [2, False, 0x31],
             (0x6060, 0): [1, True, 1], (0x6063, 0): [4, True, 0],
+            (0x6061, 0): [1, True, 0], (0x60FF, 0): [4, True, 0],
             (0x606C, 0): [4, True, 0], (0x60FD, 0): [4, False, 1],
             (0x2601, 0): [2, False, 0], (0x607A, 0): [4, True, 0],
+            (0x2602, 0): [2, False, 0],
             (0x6081, 0): [4, False, 1],
             (0x6083, 0): [4, False, 1], (0x6084, 0): [4, False, 1],
             (0x6085, 0): [4, False, 1], (0x605A, 0): [2, True, 0],
             (0x605B, 0): [2, True, 0], (0x605C, 0): [2, True, 0],
             (0x605E, 0): [2, True, 0], (0x1017, 0): [2, False, 0],
+            (0x605D, 0): [2, True, 0],
             (0x100C, 0): [2, False, 1000], (0x100D, 0): [1, False, 3],
             (0x100E, 0): [4, False, 0x700 + node_id],
             (0x6007, 0): [2, True, 0],
+            (0x6410, 3): [4, False, counts],
         }
 
     def _step(self):
@@ -60,7 +66,15 @@ class SimulatedCan:
         speed_raw = self.od[(0x6081, 0)][2]
         counts_s = speed_raw * 1875 / 512 / 60
         velocity = 0
-        if self.moving:
+        mode = self.od[(0x6060, 0)][2]
+        if self.enabled and mode == 3:
+            requested = self.od[(0x60FF, 0)][2]
+            low, high = sorted((self.lower_counts, self.lower_counts + self.maximum * self.direction))
+            step = requested * 1875 / 512 / 60 * dt
+            self.position = max(low, min(high, self.position + step))
+            velocity = requested if low < self.position < high else 0
+            self.moving = velocity != 0
+        elif self.moving:
             delta = self.target - self.position
             step = min(abs(delta), counts_s * dt)
             velocity = speed_raw if delta >= 0 else -speed_raw
@@ -72,8 +86,9 @@ class SimulatedCan:
                 velocity = 0
         self.od[(0x6063, 0)][2] = round(self.position)
         self.od[(0x606C, 0)][2] = velocity
-        lower = self.position * self.direction <= 0.5
-        upper = self.position * self.direction >= self.maximum
+        lower = (self.position - self.lower_counts) * self.direction <= 0.5
+        upper = (self.position - self.lower_counts) * self.direction >= self.maximum
+        self.od[(0x6061, 0)][2] = mode if self.enabled else 0
         self.od[(0x60FD, 0)][2] = (int(lower) | (int(upper) << 1) if self.direction == 1
                                  else int(upper) | (int(lower) << 1))
 
@@ -93,7 +108,11 @@ class SimulatedCan:
         elif value & 0x0F == 0x0F:
             self.enabled = True
             self.od[(0x6041, 0)][2] = (self.od[(0x6041, 0)][2] & 0x1400) | 0x37
-            if value & 0x10:
+            if value & 0x100:
+                self.moving = False
+                self.od[(0x6041, 0)][2] &= ~0x1000
+                return
+            if value & 0x10 and self.od[(0x6060, 0)][2] == 1:
                 self.od[(0x6041, 0)][2] |= 0x1000
                 if not previous & 0x10:
                     self.target = self.od[(0x607A, 0)][2]

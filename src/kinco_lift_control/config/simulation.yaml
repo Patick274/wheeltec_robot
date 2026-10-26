@@ -2,8 +2,16 @@
 encoder_counts_per_rev: 65536
 mm_per_motor_rev: 2.25
 up_direction: 1
-travel_mm: 200.0
+travel_mm: 4190.0
 motion_enabled: true
 commissioning_confirmed: true
 drive_limits_verified: true
 require_base_stationary: false
+require_base_feedback: false
+keyboard_control_enabled: true
+keyboard_cruise_rpm: 1000.0
+keyboard_approach_rpm: 100.0
+keyboard_lower_position_counts: 147599
+keyboard_upper_position_counts: 122303105
+keyboard_down_slow_counts: 3060000
+keyboard_up_slow_counts: 119390000

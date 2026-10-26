@@ -3,6 +3,12 @@
 #define __WHEELTEC_ROBOT_H_
 
 #include "ros/ros.h"
+#include <ros/callback_queue.h>
+#include <std_msgs/UInt64.h>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include "lift_motion_gate.h"
 #include <iostream>
 #include <string.h>
 #include <string> 
@@ -143,6 +149,18 @@ class turn_on_robot
 		//The speed topic subscribes to the callback function
 		//速度话题订阅回调函数
 		void Cmd_Vel_Callback(const geometry_msgs::Twist &twist_aux);              
+
+		// 单独的回调队列：串口读阻塞不能阻止许可超时停车。
+		ros::CallbackQueue lift_callback_queue;
+		std::unique_ptr<ros::AsyncSpinner> lift_spinner;
+		ros::Subscriber lift_permit_sub;
+		ros::Publisher lift_request_pub;
+		ros::WallTimer lift_gate_timer;
+		std::mutex lift_gate_mutex;
+		LiftMotionGate lift_gate;
+		void Lift_Permit_Callback(const std_msgs::UInt64 &msg);
+		void Lift_Gate_Tick(const ros::WallTimerEvent &event);
+		void Send_Base_Command(const geometry_msgs::Twist &command);
 
 		ros::Publisher odom_publisher, imu_publisher, voltage_publisher; //Initialize the topic publisher //初始化话题发布者
 		void Publish_Odom();      //Pub the speedometer topic //发布里程计话题

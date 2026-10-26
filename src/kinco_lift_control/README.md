@@ -1,7 +1,13 @@
 # kinco_lift_control：FD125升降控制包
 
 完整中文操作流程、逐文件解析、参数解释和排障入口见同目录explain.yaml。
+2026-10-26审查前三项已修复，部署变化及验证边界见[修复说明](docs/P1_FIXES.md)。
 explain.yaml是阅读用的说明文档；运行参数仍在config/lift.yaml中。
+
+2026-10-26新增方向键/分区速度控制，最新说明见[键盘分区控制](docs/KEYBOARD_CONTROL.md)。
+同日补充底盘运动100rpm上限与米制顶端高度指令，见[底盘限速与高度控制](docs/BASE_HEIGHT_CONTROL.md)。
+Windows用户反馈双向限位及实机运动有效；这不等于Jetson真实CAN联调或整机验收完成。
+本次只修改本地源码，未连接/部署Jetson，未启动电机。
 
 适配当前PHM的ROS1/catkin工程，目标环境为Ubuntu 20.04 + ROS Noetic + Python3，
 CPU可以是Jetson ARM64或x86。你本次说“Xavier TX”，此前说“Xavier NX”；
@@ -15,15 +21,16 @@ CPU可以是Jetson ARM64或x86。你本次说“Xavier TX”，此前说“Xavie
 - 启动默认只读，不使能、不回零、不自动复位故障、不自动重新连接。
 - 读状态字、实际位置、实际速度原始值、限位状态、报警状态。
 - 显式使能/禁止、限速的小距离点动、下限位处记录会话零点、绝对高度定位。
-- 底盘停车检查：同时检查/odom反馈及/cmd_vel指令；丢失里程计也禁止运动。
+- 底盘反馈检查：同时检查/odom及/cmd_vel；运动/准备运动时限100rpm，反馈丢失/非法则停止。
+- 顶端总高度（米）服务：总高度=待测初始顶端高度+相对下限位伸长量；未知初始高度时拒绝。
 - 停止锁存、目标范围/整数溢出检查、定位超时、CAN掉线停止请求。
 - 驱动器侧节点保护；过程卡住或被杀死后，不再持续发送监督报文。
 - 同一控制器的内存模拟、无ROS单元测试及独立只读通信探测工具。
 
-本包不改已有底盘串口协议、导航启动文件、URDF，也不自动控制底盘停车。
-停车检查是软件联锁，不会阻止其他节点向底盘下发运动命令。
-升降过程中一旦发现底盘运动，本包请求升降停止。若要主动禁止底盘运动，
-需要后续将/lift/busy接入现有twist_mux锁或任务调度。
+已同时修改turn_on_wheeltec_robot的实际串口速度入口，串口报文格式、导航及URDF不变。
+底盘持续申请带序号的100rpm许可，只有升降实际/目标转速都满足限制才发送非零底盘速度；
+许可/指令/反馈过期时发送底盘零速。必须同步编译两个包，单独更新升降包不构成完整联锁。
+未启动健康的lift节点时底盘不能行驶；高位行车稳定性和下位机失联停车仍需实机验收。
 
 ## 接线与初次调试
 
@@ -42,7 +49,7 @@ X3 8脚24V+/1脚24V-仅在需要外部逻辑供电时使用，不是必接第二
 SMK60S-0040-30QAK-5DSA的电机参数按实物和厂家配置，不由本包自动写入。
 KS3的CAN控制会与本包争用，运行本包前关闭KS3通信及其他CAN主站。
 
-当前只确认有下限位，上限位尚未确定，因此默认drive_limits_verified=false；
+当前用户已在Windows侧验证上下限位，ROS实机联调尚未完成，因此仍保留drive_limits_verified=false；
 不能仅修改开关为true就当作已安装、验证。必须完成实际硬件行程保护。
 不执行自动寻底，不把首次读到的位置当作机械零点。
 驱动器、电机断电、编码器位置复位或本节点重启后，应重新建立会话零点。
@@ -154,23 +161,25 @@ rostopic echo /lift/status
 
 编辑config/lift.yaml：
 - encoder_counts_per_rev：KS3的有效反馈精度inc/电机转，不直接使用23bit编码器标称值。
-  手册示例是65536，但本设备尚未确认，默认0。
+  本设备Windows参数已确认65536，运行配置已记录；Jetson仍需回读核对。
 - mm_per_motor_rev：电机每转实际伸长毫米数。附图标16:1、导程36mm，
-  理论候选值36/16=2.25mm/电机转；多级传动/伸缩结构的倍率必须实测确认，默认0。
+  图纸36/16=2.25mm/电机转，与约4190mm的计数实测吻合，配置暂取2.25。
 - up_direction：6063计数增大对应上升则+1，反之-1。
   正负限位名称是电机计数方向，本包按up_direction映射为下/上限位。
-- travel_mm：实际允许伸出量，保留机械余量。图纸4200mm不能直接当软件安全边界，默认0。
+- travel_mm：已记录实测4190mm候选跨度，仍受两端5mm内缩边界约束，并非完成安全余量验收。
+- initial_top_height_m：下限位静止时机器人顶端距地面的总高度，单位m，未知保持null。
 - commissioning_confirmed：完成电机匹配、方向、停止、机械保持验证后才能true。
 - drive_limits_verified：物理上下限位、IO功能/极性及驱动器保护实测通过后才能true。
 - motion_enabled：以上就绪后显式改true。不提供命令行绕过开关。
-- 速度、加速度、单步长度和超时按机械能力设置。默认点动不超过1mm、最高5mm/s。
+- 速度、加速度、单步长度和超时按机械能力设置。默认点动不超过1mm；
+  最新速度上限37.5mm/s对应1000rpm，不代表实机已放行，默认运动许可仍为false。
   要验证电池总20A的功率预算；本包不把电池电流当作电机相电流，
   不自行修改6073电流限制。
 - /odom与/cmd_vel若实际有命名空间/重映射，修改对应话题。
 
 修改YAML需重启节点；配置不会在线静默改变。
 启动后仍需显式调用enable。
-默认motion_timeout_s=30，长行程请分段，或经确认后调整；不会自动延长超时。
+默认motion_timeout_s=110，且受累计运动预算约束；长行程分段并遵守冷却要求，不自动延长超时。
 
 ## 硬件操作顺序
 
@@ -209,6 +218,10 @@ rostopic echo /lift/status
 | /lift/reference_here | std_srvs/Trigger | 在静止下限位处建立0mm |
 | /lift/jog | kinco_lift_control/JogLift | 有限长度相对点动 |
 | /lift/move | kinco_lift_control/MoveLift | 相对本会话零点的绝对高度 |
+| /lift/move_top_height | kinco_lift_control/MoveTopHeight | 顶端总高度m，初始高度需先测量配置 |
+| /lift/top_height_m | std_msgs/Float64 | 有有效参考及初始高度时发布 |
+| /lift/request_base_motion | std_srvs/SetBool | 起步前请求100rpm上限并回读实际速度许可 |
+| /lift/base_motion_permitted | std_msgs/Bool | 非锁存底盘运动许可，需底盘侧实际接入并检查新鲜度 |
 | /lift/status | std_msgs/String | JSON状态；position_mm未知时为null |
 | /lift/position_mm | std_msgs/Float64 | 仅有有效参考后发布 |
 | /lift/busy | std_msgs/Bool | 未完成定位或尚未确认停稳；停止回执后不会立即解锁 |

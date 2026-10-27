@@ -43,19 +43,19 @@ using namespace std;
 
 //Relative to the range set by the IMU gyroscope, the range is ±500°, corresponding data range is ±32768
 //The gyroscope raw data is converted in radian (rad) units, 1/65.5/57.30=0.00026644
-//与IMU陀螺仪设置的量程有关，量程±500°，对应数据范围±32768
-//陀螺仪原始数据转换位弧度(rad)单位，1/65.5/57.30=0.00026644
+//与IMU陀螺仪设置的量程有关,量程±500°,对应数据范围±32768
+//陀螺仪原始数据转换位弧度(rad)单位,1/65.5/57.30=0.00026644
 #define GYROSCOPE_RATIO   0.00026644f
 //Relates to the range set by the IMU accelerometer, range is ±2g, corresponding data range is ±32768
 //Accelerometer original data conversion bit m/s^2 units, 32768/2g=32768/19.6=1671.84	
-//与IMU加速度计设置的量程有关，量程±2g，对应数据范围±32768
-//加速度计原始数据转换位m/s^2单位，32768/2g=32768/19.6=1671.84
+//与IMU加速度计设置的量程有关,量程±2g,对应数据范围±32768
+//加速度计原始数据转换位m/s^2单位,32768/2g=32768/19.6=1671.84
 #define ACCEl_RATIO 	  1671.84f  	
 
-extern sensor_msgs::Imu Mpu6050; //External variables, IMU topic data //外部变量，IMU话题数据
+extern sensor_msgs::Imu Mpu6050; //External variables, IMU topic data //外部变量,IMU话题数据
 
 //Covariance matrix for speedometer topic data for robt_pose_ekf feature pack
-//协方差矩阵，用于里程计话题数据，用于robt_pose_ekf功能包
+//协方差矩阵,用于里程计话题数据,用于robt_pose_ekf功能包
 const double odom_pose_covariance[36]   = {1e-3,    0,    0,   0,   0,    0, 
 										      0, 1e-3,    0,   0,   0,    0,
 										      0,    0,  1e6,   0,   0,    0,
@@ -85,7 +85,7 @@ const double odom_twist_covariance2[36] = {1e-9,    0,    0,   0,   0,    0,
 										      0,    0,    0,   0,   0, 1e-9} ;
 
 //Data structure for speed and position
-//速度、位置数据结构体
+//速度,位置数据结构体
 typedef struct __Vel_Pos_Data_
 {
 	float X;
@@ -132,7 +132,7 @@ typedef struct _RECEIVE_DATA_
 }RECEIVE_DATA;
 
 //The robot chassis class uses constructors to initialize data, publish topics, etc
-//机器人底盘类，使用构造函数初始化数据和发布话题等
+//机器人底盘类,使用构造函数初始化数据和发布话题等
 class turn_on_robot
 {
 	public:
@@ -142,15 +142,15 @@ class turn_on_robot
 		serial::Serial Stm32_Serial; //Declare a serial object //声明串口对象 
 	private:
 		ros::NodeHandle n;           //Create a ROS node handle //创建ROS节点句柄
-		ros::Time _Now, _Last_Time;  //Time dependent, used for integration to find displacement (mileage) //时间相关，用于积分求位移(里程)
-		float Sampling_Time;         //Sampling time, used for integration to find displacement (mileage) //采样时间，用于积分求位移(里程)
+		ros::Time _Now, _Last_Time;  //Time dependent, used for integration to find displacement (mileage) //时间相关,用于积分求位移(里程)
+		float Sampling_Time;         //Sampling time, used for integration to find displacement (mileage) //采样时间,用于积分求位移(里程)
 
 		ros::Subscriber Cmd_Vel_Sub; //Initialize the topic subscriber //初始化话题订阅者
 		//The speed topic subscribes to the callback function
 		//速度话题订阅回调函数
 		void Cmd_Vel_Callback(const geometry_msgs::Twist &twist_aux);              
 
-		// 单独的回调队列：串口读阻塞不能阻止许可超时停车。
+		// 单独的回调队列:串口读阻塞不能阻止许可超时停车.
 		ros::CallbackQueue lift_callback_queue;
 		std::unique_ptr<ros::AsyncSpinner> lift_spinner;
 		ros::Subscriber lift_permit_sub;
@@ -167,7 +167,7 @@ class turn_on_robot
 		void Publish_ImuSensor(); //Pub the IMU sensor topic //发布IMU传感器话题
 		void Publish_Voltage();   //Pub the power supply voltage topic //发布电源电压话题
 
-        //从串口(ttyUSB)读取运动底盘速度、IMU、电源电压数据
+        //从串口(ttyUSB)读取运动底盘速度,IMU,电源电压数据
         //Read motion chassis speed, IMU, power supply voltage data from serial port (ttyUSB)
         bool Get_Sensor_Data();   
 		bool Get_Sensor_Data_New();

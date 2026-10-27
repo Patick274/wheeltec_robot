@@ -10,7 +10,7 @@ scope: 模型切换到新 SolidWorks 模型 + 修正 TF 树 + 清理车型参数
 背景:
   - 原运行的模型 mini_diff_robot.urdf(简易盒体+3轮) 与实际调试的机器人不符
   - 新模型是 SolidWorks 导出的 wheeltec_robot/urdf/wheeltec_robot.urdf
-    (含升降杆 arm_link、双雷达、IMU)
+    (含升降杆 arm_link,双雷达,IMU)
   - 目标: 传感器位置用新模型,命名沿用原代码;核心只改 wheeltec_robot.urdf 一个文件
 
 # ---------- 改动 1: wheeltec_robot/urdf/wheeltec_robot.urdf 重命名 ----------
@@ -133,6 +133,6 @@ tf树:
   - RViz 中核对 /scan 朝向: 机器人前方障碍物应出现在正前方
     (若整体左右镜像 180°,说明 rotate 方向判断反了,把 base_to_laser 的 yaw 改回 3.14)
   - RViz 中核对 /scan 与 /scan1 /scan2 位置关系:
-    laser1 在 +0.3、laser2 在 -0.3,融合 /scan 应落在两者之间的中心且与墙体对齐
+    laser1 在 +0.3,laser2 在 -0.3,融合 /scan 应落在两者之间的中心且与墙体对齐
   - footprint/inflation_radius 为推导值(0.724×0.559 实测 + 余量,inflation 0.4),
     跑导航后按实际避障/过窄口表现微调 param_senior_wheeltec/costmap_common_params.yaml

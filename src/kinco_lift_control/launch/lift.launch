@@ -1,12 +1,12 @@
 <launch>
-  <!-- 默认实物只读；simulate=true使用内存模拟器，完全不打开物理CAN接口。 -->
+  <!-- 默认实物只读;simulate=true使用内存模拟器,完全不打开物理CAN接口. -->
   <arg name="simulate" default="false"/>
   <arg name="can_interface" default="can0"/>
   <arg name="node_id" default="1"/>
   <arg name="config" default="$(find kinco_lift_control)/config/lift.yaml"/>
   <node pkg="kinco_lift_control" type="lift_node.py" name="lift"
         output="screen" respawn="false" required="true">
-    <!-- 配置加载到节点私有命名空间；explain.yaml是说明文档，不要加载为参数。 -->
+    <!-- 配置加载到节点私有命名空间;explain.yaml是说明文档,不要加载为参数. -->
     <rosparam command="load" file="$(arg config)"/>
     <rosparam if="$(arg simulate)" command="load"
               file="$(find kinco_lift_control)/config/simulation.yaml"/>

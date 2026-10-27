@@ -1,146 +1,146 @@
-# 阅读说明，不是rosparam运行配置；不需要编译、执行或加载本文件。
-# 2026-10-26新增方向键/分区配速，以下旧章节未逐条覆盖新功能，请优先阅读docs/KEYBOARD_CONTROL.md。
-# 同日追加底盘运动100rpm限速和顶端总高度m服务，优先阅读docs/BASE_HEIGHT_CONTROL.md。
+# 阅读说明,不是rosparam运行配置;不需要编译,执行或加载本文件.
+# 2026-10-26新增方向键/分区配速,以下旧章节未逐条覆盖新功能,请优先阅读docs/KEYBOARD_CONTROL.md.
+# 同日追加底盘运动100rpm限速和顶端总高度m服务,优先阅读docs/BASE_HEIGHT_CONTROL.md.
 底盘与顶端高度更新:
   新说明: "docs/BASE_HEIGHT_CONTROL.md"
-  移动底盘上限: "100rpm；反馈丢失或非法仍停止，严格实际限速需底盘先握手获准再起步"
-  新服务: "/lift/move_top_height，target_height_m为目标顶端总高度m，不是增量"
-  待填参数: "initial_top_height_m，机器人在会话下限位零点时顶端距地面的实测总高度"
-  初始高度未知: "保持null，只拒绝顶端高度服务，不伪造0m"
+  移动底盘上限: "100rpm;反馈丢失或非法仍停止,严格实际限速需底盘先握手获准再起步"
+  新服务: "/lift/move_top_height,target_height_m为目标顶端总高度m,不是增量"
+  待填参数: "initial_top_height_m,机器人在会话下限位零点时顶端距地面的实测总高度"
+  初始高度未知: "保持null,只拒绝顶端高度服务,不伪造0m"
 
 键盘控制更新:
   日期: "2026-10-26"
-  入口: "scripts/lift_keyboard.py；Linux终端rosrun，↑上升、↓下降、空格停车"
+  入口: "scripts/lift_keyboard.py;Linux终端rosrun,↑上升,↓下降,空格停车"
   新说明: "docs/KEYBOARD_CONTROL.md"
-  配速: "中段1000rpm，下降至3060000inc或上升至119390000inc降为100rpm"
-  边界: "只改本地代码；默认不放行实机，未连接或部署Jetson"
+  配速: "中段1000rpm,下降至3060000inc或上升至119390000inc降为100rpm"
+  边界: "只改本地代码;默认不放行实机,未连接或部署Jetson"
   新测试: "tests/test_keyboard.py"
 
 文档信息:
   名称: "kinco_lift_control 升降控制包使用与文件解析"
   更新日期: "2026-10-18"
-  用途: "配合源码中文注释，理解程序、编译运行、配置标定和排查问题"
+  用途: "配合源码中文注释,理解程序,编译运行,配置标定和排查问题"
   运行参数文件: "config/lift.yaml"
-  注意: "不要把explain.yaml作为lift.launch的config参数；它不是运行配置。"
+  注意: "不要把explain.yaml作为lift.launch的config参数;它不是运行配置."
 
 一_适用环境与连接:
   软件:
     系统: "Ubuntu 20.04"
-    ROS: "ROS1 Noetic，Python3；按当前wheeltec_robot的catkin工程组织"
-    主机: "Jetson Xavier系列；实际板卡型号以实物为准，程序使用Linux SocketCAN"
+    ROS: "ROS1 Noetic,Python3;按当前wheeltec_robot的catkin工程组织"
+    主机: "Jetson Xavier系列;实际板卡型号以实物为准,程序使用Linux SocketCAN"
   已确定设备:
     驱动器: "步科FD125-AB-000"
     电机: "SMK60S-0040-30QAK-5DSA"
-    机构: "HTL4升降机构，具体传动和可用行程仍需实测"
-    适配器: "隔离型USB-CAN，预刷candleLight，由Linux gs_usb驱动识别"dd
+    机构: "HTL4升降机构,具体传动和可用行程仍需实测"
+    适配器: "隔离型USB-CAN,预刷candleLight,由Linux gs_usb驱动识别"dd
   数据链路: "ROS服务 -> LiftController -> SdoClient -> SocketCAN -> USB-CAN -> FD125 -> 电机"
-  供电说明: "CAN转换器负责通信；驱动器动力电源和逻辑电源仍须按接线要求独立接好。"
+  供电说明: "CAN转换器负责通信;驱动器动力电源和逻辑电源仍须按接线要求独立接好."
   X1A_CAN接线:
     CAN_H: "FD125 X1A 1脚"
     CAN_L: "FD125 X1A 2脚"
     CAN侧GND: "FD125 X1A 3脚"
-    终端: "总线两个物理末端各120Ω，已内置启用的不要重复外接。"
+    终端: "总线两个物理末端各120Ω,已内置启用的不要重复外接."
   默认通信:
     网卡: "can0"
     站号: 1
-    波特率: "500000 bit/s；由Linux和KS3分别配置一致，不由本节点自动修改"
+    波特率: "500000 bit/s;由Linux和KS3分别配置一致,不由本节点自动修改"
 
 二_文件解析:
   "package.xml":
-    作用: "ROS包名称、版本和依赖清单；包名是kinco_lift_control。"
-    依赖: "catkin、rospy、std_msgs、std_srvs、geometry_msgs、nav_msgs及服务生成依赖"
+    作用: "ROS包名称,版本和依赖清单;包名是kinco_lift_control."
+    依赖: "catkin,rospy,std_msgs,std_srvs,geometry_msgs,nav_msgs及服务生成依赖"
   "CMakeLists.txt":
-    作用: "生成MoveLift/JogLift服务，安装Python程序、配置、启动文件和本文档。"
-    说明: "虽然主体是Python，ROS包仍通过catkin构建以生成服务类型。"
+    作用: "生成MoveLift/JogLift服务,安装Python程序,配置,启动文件和本文档."
+    说明: "虽然主体是Python,ROS包仍通过catkin构建以生成服务类型."
   "setup.py":
-    作用: "安装src/kinco_lift内的Python模块。"
-    易混点: "手写模块是kinco_lift；自动生成服务位于kinco_lift_control.srv。"
+    作用: "安装src/kinco_lift内的Python模块."
+    易混点: "手写模块是kinco_lift;自动生成服务位于kinco_lift_control.srv."
   "scripts/lift_node.py":
-    作用: "正式ROS节点入口，订阅底盘速度，提供服务，轮询并发布升降状态。"
-    初始化: "读取私有参数，选择实物或模拟传输，创建停车检查器和控制器。"
-    回调: "odom_cb接收实测速度；cmd_cb接收速度指令；_run串行执行服务请求。"
-    主循环: "run用单调墙钟轮询；异常时fail并发布原因；shutdown释放连接。"
-    启动: "由launch/lift.launch启动，一般不直接执行此文件。"
+    作用: "正式ROS节点入口,订阅底盘速度,提供服务,轮询并发布升降状态."
+    初始化: "读取私有参数,选择实物或模拟传输,创建停车检查器和控制器."
+    回调: "odom_cb接收实测速度;cmd_cb接收速度指令;_run串行执行服务请求."
+    主循环: "run用单调墙钟轮询;异常时fail并发布原因;shutdown释放连接."
+    启动: "由launch/lift.launch启动,一般不直接执行此文件."
   "scripts/probe_drive.py":
-    作用: "独立只读探测工具，不依赖ROS节点运行或自定义服务生成。"
-    数据: "读取6041、6063、606C、60FD、2601、6060并输出JSON。"
-    说明: "不使能、不修改对象；退出后再启动正式控制节点。"
+    作用: "独立只读探测工具,不依赖ROS节点运行或自定义服务生成."
+    数据: "读取6041,6063,606C,60FD,2601,6060并输出JSON."
+    说明: "不使能,不修改对象;退出后再启动正式控制节点."
   "src/kinco_lift/canopen.py":
-    作用: "CAN传输与CANopen报文层；与ROS及机械高度无关。"
-    SocketCan: "打开Linux原始CAN套接字，封装经典CAN帧并接收错误帧。"
-    SdoClient: "串行读写1/2/4字节对象，检查站号、索引、子索引和回执。"
-    异步事件: "在等待SDO时处理boot-up重启、EMCY报警和节点保护回复。"
-    异常处理: "超时、对象不匹配或中止应答使会话失效，不自动重试。"
+    作用: "CAN传输与CANopen报文层;与ROS及机械高度无关."
+    SocketCan: "打开Linux原始CAN套接字,封装经典CAN帧并接收错误帧."
+    SdoClient: "串行读写1/2/4字节对象,检查站号,索引,子索引和回执."
+    异步事件: "在等待SDO时处理boot-up重启,EMCY报警和节点保护回复."
+    异常处理: "超时,对象不匹配或中止应答使会话失效,不自动重试."
   "src/kinco_lift/controller.py":
-    作用: "升降业务核心，检查标定、计算计数、控制使能、运动与停止。"
-    LiftConfig: "读取配置，检查运动门禁，提供速度/加速度内部单位换算。"
-    LiftController: "保存反馈、目标、零点、使能、停止锁存及节点保护状态。"
+    作用: "升降业务核心,检查标定,计算计数,控制使能,运动与停止."
+    LiftConfig: "读取配置,检查运动门禁,提供速度/加速度内部单位换算."
+    LiftController: "保存反馈,目标,零点,使能,停止锁存及节点保护状态."
     关键函数:
-      poll: "读反馈，检查底盘停车、限位、故障、重启、超时和到位条件。"
-      enable: "显式使能，配置并回读停止策略和节点保护，执行6/7/F握手。"
-      reference_here: "静止且下限位有效时记录会话零点，不执行找零运动。"
-      move: "根据jog选择相对步长或绝对高度，检查后执行2F/3F目标握手。"
-      stop: "停止锁存并请求000B快停；返回值仅代表写入回执。"
-      reset: "人工复位故障/停止锁存，清除会话零点，不恢复上次任务。"
-      disable: "在确认停稳后取消使能。"
-      fail: "异常入口，撤销零点并请求停止。"
+      poll: "读反馈,检查底盘停车,限位,故障,重启,超时和到位条件."
+      enable: "显式使能,配置并回读停止策略和节点保护,执行6/7/F握手."
+      reference_here: "静止且下限位有效时记录会话零点,不执行找零运动."
+      move: "根据jog选择相对步长或绝对高度,检查后执行2F/3F目标握手."
+      stop: "停止锁存并请求000B快停;返回值仅代表写入回执."
+      reset: "人工复位故障/停止锁存,清除会话零点,不恢复上次任务."
+      disable: "在确认停稳后取消使能."
+      fail: "异常入口,撤销零点并请求停止."
   "src/kinco_lift/interlock.py":
-    作用: "底盘停车软件检查，无ROS依赖。"
-    条件: "里程计新鲜、实测速度低于阈值、持续静止足够久、速度指令无非零/非法值。"
-    边界: "不主动给底盘发零速度，也未自动接入twist_mux硬件/软件锁。"
+    作用: "底盘停车软件检查,无ROS依赖."
+    条件: "里程计新鲜,实测速度低于阈值,持续静止足够久,速度指令无非零/非法值."
+    边界: "不主动给底盘发零速度,也未自动接入twist_mux硬件/软件锁."
   "src/kinco_lift/simulator.py":
-    作用: "内存模拟驱动器，供测试和simulate模式使用，绝不连接实物CAN。"
-    范围: "简化对象字典、SDO应答、状态机、位置变化、限位及节点保护超时。"
-    边界: "未模拟惯量、实际负载、真实加减速、电源和电磁干扰。"
+    作用: "内存模拟驱动器,供测试和simulate模式使用,绝不连接实物CAN."
+    范围: "简化对象字典,SDO应答,状态机,位置变化,限位及节点保护超时."
+    边界: "未模拟惯量,实际负载,真实加减速,电源和电磁干扰."
   "src/kinco_lift/__init__.py":
-    作用: "标识可导入的Python模块目录。"
+    作用: "标识可导入的Python模块目录."
   "config/lift.yaml":
-    作用: "真实硬件的运行参数；默认只读，未知标定值为0。"
+    作用: "真实硬件的运行参数;默认只读,未知标定值为0."
   "config/simulation.yaml":
-    作用: "离线模拟参数；仅simulate=true时覆盖加载，不可照抄为实机参数。"
+    作用: "离线模拟参数;仅simulate=true时覆盖加载,不可照抄为实机参数."
   "launch/lift.launch":
-    作用: "加载配置并启动名为lift的节点，所以私有接口展开为/lift/...。"
-    参数: "simulate、can_interface、node_id、config"
-    行为: "默认simulate=false，不自动重启控制节点。"
+    作用: "加载配置并启动名为lift的节点,所以私有接口展开为/lift/...."
+    参数: "simulate,can_interface,node_id,config"
+    行为: "默认simulate=false,不自动重启控制节点."
   "srv/MoveLift.srv":
-    作用: "定义绝对高度定位请求与接收结果。"
-    请求: "height_mm、speed_mm_s"
-    应答: "accepted、message；accepted不等于已到位。"
+    作用: "定义绝对高度定位请求与接收结果."
+    请求: "height_mm,speed_mm_s"
+    应答: "accepted,message;accepted不等于已到位."
   "srv/JogLift.srv":
-    作用: "定义有限长度点动；请求distance_mm、speed_mm_s。"
-    方向: "distance_mm正数上升，负数下降。"
+    作用: "定义有限长度点动;请求distance_mm,speed_mm_s."
+    方向: "distance_mm正数上升,负数下降."
   "tests/test_lift.py":
-    作用: "31项无硬件测试，覆盖通信、换算、使能、限位、停车、停止和故障。"
+    作用: "31项无硬件测试,覆盖通信,换算,使能,限位,停车,停止和故障."
   "README.md":
-    作用: "开发与运行说明，内容与本文档配合阅读。"
+    作用: "开发与运行说明,内容与本文档配合阅读."
   "explain.yaml":
-    作用: "本文件，中文使用流程和逐文件解析，不作为运行参数。"
+    作用: "本文件,中文使用流程和逐文件解析,不作为运行参数."
   ".gitignore":
-    作用: "忽略Python自动生成的字节码与缓存。"
+    作用: "忽略Python自动生成的字节码与缓存."
 
 三_程序调用流程:
   启动:
-    - "lift.launch加载config/lift.yaml；模拟时再加载simulation.yaml。"
-    - "lift_node.py创建SocketCan或SimulatedCan，然后创建SdoClient和LiftController。"
-    - "开始订阅底盘状态、注册ROS服务、读取驱动器状态。"
-    - "不会自动使能、寻零、清故障或执行上次目标。"
+    - "lift.launch加载config/lift.yaml;模拟时再加载simulation.yaml."
+    - "lift_node.py创建SocketCan或SimulatedCan,然后创建SdoClient和LiftController."
+    - "开始订阅底盘状态,注册ROS服务,读取驱动器状态."
+    - "不会自动使能,寻零,清故障或执行上次目标."
   使能:
-    - "先核对三项许可开关和机械标定，确认底盘保持静止。"
-    - "读最新状态，控制字0006进入运行就绪。"
-    - "设置位置模式、加减速和停止策略，并逐项回读。"
-    - "配置节点保护，确认回复，再执行0007、000F使能。"
+    - "先核对三项许可开关和机械标定,确认底盘保持静止."
+    - "读最新状态,控制字0006进入运行就绪."
+    - "设置位置模式,加减速和停止策略,并逐项回读."
+    - "配置节点保护,确认回复,再执行0007,000F使能."
   定位:
-    - "MoveLift必须已有会话零点；JogLift受有限步长约束。"
-    - "毫米目标换算为int32计数，检查速度、行程、限位和超时。"
-    - "写002F并等bit12清零，写6081速度和607A目标，再写003F并等bit12应答。"
-    - "服务返回后由poll继续检查，到位需bit10、位置误差和低速条件同时满足。"
+    - "MoveLift必须已有会话零点;JogLift受有限步长约束."
+    - "毫米目标换算为int32计数,检查速度,行程,限位和超时."
+    - "写002F并等bit12清零,写6081速度和607A目标,再写003F并等bit12应答."
+    - "服务返回后由poll继续检查,到位需bit10,位置误差和低速条件同时满足."
   停止:
-    - "下发000B并锁住后续运动，等待反馈确认停稳；busy在此期间保持true。"
-    - "通信中断时停机命令可能送不到，节点保护和硬件急停仍需实物验证。"
-    - "排查后显式复位、使能并重新记录零点；不会自动恢复运动。"
+    - "下发000B并锁住后续运动,等待反馈确认停稳;busy在此期间保持true."
+    - "通信中断时停机命令可能送不到,节点保护和硬件急停仍需实物验证."
+    - "排查后显式复位,使能并重新记录零点;不会自动恢复运动."
 
 四_首次使用命令:
-  路径说明: "下面假设Jetson工作区为~/wheeltec_robot；按实际路径替换。不要在Windows执行ROS命令。"
+  路径说明: "下面假设Jetson工作区为~/wheeltec_robot;按实际路径替换.不要在Windows执行ROS命令."
   编译: |
     source /opt/ros/noetic/setup.bash
     cd ~/wheeltec_robot
@@ -166,11 +166,11 @@
     rosservice call /lift/reference_here "{}"
     rosservice call /lift/move "{height_mm: 10.0, speed_mm_s: 2.0}"
     rostopic echo /lift/status
-  模拟操作说明: "rostopic echo持续显示；Ctrl+C结束查看，再执行其他命令。"
+  模拟操作说明: "rostopic echo持续显示;Ctrl+C结束查看,再执行其他命令."
   配置实物CAN: |
     sudo modprobe gs_usb
     ip -details link show
-    # 确认can0对应升降转换器、没有被底盘或其他主站占用，再进行下面配置。
+    # 确认can0对应升降转换器,没有被底盘或其他主站占用,再进行下面配置.
     sudo ip link set can0 down
     sudo ip link set can0 type can bitrate 500000 restart-ms 0
     sudo ip link set can0 up
@@ -181,128 +181,128 @@
     python3 src/kinco_lift_control/scripts/probe_drive.py --interface can0 --node-id 1
     roslaunch kinco_lift_control lift.launch
   查看状态: "rostopic echo /lift/status"
-  重要说明: "probe完成并退出后再启动正式节点；不要同时运行两个主站或KS3控制。"
+  重要说明: "probe完成并退出后再启动正式节点;不要同时运行两个主站或KS3控制."
 
 五_实物运动配置与顺序:
-  参数位置: "config/lift.yaml，修改后需重启节点，参数不在线静默更新。"
+  参数位置: "config/lift.yaml,修改后需重启节点,参数不在线静默更新."
   待确认参数:
-    encoder_counts_per_rev: "KS3有效反馈精度inc/电机转；未知为0，不照抄65536。"
-    mm_per_motor_rev: "实测每电机转实际伸出mm；图纸36/16=2.25仅为待核实候选。"
-    up_direction: "计数增大对应上升填+1；反向填-1。"
-    travel_mm: "实测可用伸出量并留机械余量，不直接使用总高度或图纸最大行程。"
-    commissioning_confirmed: "完成电机匹配、方向、保持和停止验证后才能true。"
-    drive_limits_verified: "上下硬件限位、输入功能和极性均通过实测后才能true。"
-    motion_enabled: "完成上述确认后才开放运动；true也不会启动即使能。"
-  当前限制: "此前仅确认下限位；上限位未确认时保持drive_limits_verified=false。"
-  底盘条件: "先启动底盘里程计并停车；/odom需持续更新，/cmd_vel应为零。"
+    encoder_counts_per_rev: "KS3有效反馈精度inc/电机转;未知为0,不照抄65536."
+    mm_per_motor_rev: "实测每电机转实际伸出mm;图纸36/16=2.25仅为待核实候选."
+    up_direction: "计数增大对应上升填+1;反向填-1."
+    travel_mm: "实测可用伸出量并留机械余量,不直接使用总高度或图纸最大行程."
+    commissioning_confirmed: "完成电机匹配,方向,保持和停止验证后才能true."
+    drive_limits_verified: "上下硬件限位,输入功能和极性均通过实测后才能true."
+    motion_enabled: "完成上述确认后才开放运动;true也不会启动即使能."
+  当前限制: "此前仅确认下限位;上限位未确认时保持drive_limits_verified=false."
+  底盘条件: "先启动底盘里程计并停车;/odom需持续更新,/cmd_vel应为零."
   实物调试顺序:
-    - "只读检查CAN及报警状态，确认KS3已完成电机和IO设置。"
-    - "填写并核实参数，重启节点，再显式调用enable。"
-    - "在已验证硬件保护范围内做0.5mm点动，核对方向和实际位移。"
-    - "机构停在下限位且反馈有效时调用reference_here记录0mm。"
-    - "执行短程高度定位，持续检查状态，不直接开始整行程。"
+    - "只读检查CAN及报警状态,确认KS3已完成电机和IO设置."
+    - "填写并核实参数,重启节点,再显式调用enable."
+    - "在已验证硬件保护范围内做0.5mm点动,核对方向和实际位移."
+    - "机构停在下限位且反馈有效时调用reference_here记录0mm."
+    - "执行短程高度定位,持续检查状态,不直接开始整行程."
   显式使能: 'rosservice call /lift/enable "data: true"'
   上升点动: 'rosservice call /lift/jog "{distance_mm: 0.5, speed_mm_s: 0.5}"'
   下降点动: 'rosservice call /lift/jog "{distance_mm: -0.5, speed_mm_s: 0.5}"'
-  点动说明: "等待前一次完成再下发；下限位激活时下降被拒绝。"
+  点动说明: "等待前一次完成再下发;下限位激活时下降被拒绝."
   记录下限位零点: 'rosservice call /lift/reference_here "{}"'
   移动到10mm: 'rosservice call /lift/move "{height_mm: 10.0, speed_mm_s: 1.0}"'
   停止并锁存: 'rosservice call /lift/stop "{}"'
   人工复位: 'rosservice call /lift/reset_fault "{}"'
   停稳后取消使能: 'rosservice call /lift/enable "data: false"'
-  零点说明: "只是记录本会话偏移；不写编码器，不自动寻底，异常或重启后需重新建立。"
-  长行程: "默认运动超时30秒，请分段执行，或核实后调整；程序不会自动延长。"
+  零点说明: "只是记录本会话偏移;不写编码器,不自动寻底,异常或重启后需重新建立."
+  长行程: "默认运动超时30秒,请分段执行,或核实后调整;程序不会自动延长."
 
 六_参数解释:
-  can_interface: "Linux CAN接口名，默认can0，不能填串口设备名。"
-  node_id: "驱动器站号，默认1，必须与KS3/拨码设置一致，范围1至127。"
-  sdo_timeout_s: "每次SDO等待上限，默认0.15秒；超时锁定，不重试。"
-  poll_hz: "反馈轮询频率，默认10Hz，允许5至20Hz。"
-  max_speed_mm_s: "线速度上限，默认5mm/s；不是驱动器内部DEC。"
-  max_motor_rpm: "电机转速上限，默认200rpm，线速度换算后也要满足此限制。"
-  acceleration_rps_s: "电机转/秒²，默认1，程序换算为6083/6084内部单位。"
-  quick_stop_deceleration_rps_s: "快速停止减速度，默认2电机转/秒²。"
-  max_jog_mm: "一次点动的最大绝对步长，默认1mm，不是连续按键运动。"
-  motion_timeout_s: "单次运动监控超时，默认30秒。"
-  position_tolerance_mm: "完成定位的位置误差窗口，默认0.2mm。"
-  require_base_stationary: "默认true；真实模式不允许关闭停车检查。"
-  base_odom_topic: "实测底盘速度，默认/odom；有命名空间时修改。"
-  base_command_topic: "底盘速度指令，默认/cmd_vel；有重映射时修改。"
-  odom_timeout_s: "里程计最大允许间隔，默认0.5秒。"
-  base_stationary_s: "连续静止确认时间，默认1秒。"
-  base_linear_threshold_m_s: "底盘静止线速度阈值，默认0.01m/s。"
-  base_angular_threshold_rad_s: "底盘静止角速度阈值，默认0.02rad/s。"
+  can_interface: "Linux CAN接口名,默认can0,不能填串口设备名."
+  node_id: "驱动器站号,默认1,必须与KS3/拨码设置一致,范围1至127."
+  sdo_timeout_s: "每次SDO等待上限,默认0.15秒;超时锁定,不重试."
+  poll_hz: "反馈轮询频率,默认10Hz,允许5至20Hz."
+  max_speed_mm_s: "线速度上限,默认5mm/s;不是驱动器内部DEC."
+  max_motor_rpm: "电机转速上限,默认200rpm,线速度换算后也要满足此限制."
+  acceleration_rps_s: "电机转/秒²,默认1,程序换算为6083/6084内部单位."
+  quick_stop_deceleration_rps_s: "快速停止减速度,默认2电机转/秒²."
+  max_jog_mm: "一次点动的最大绝对步长,默认1mm,不是连续按键运动."
+  motion_timeout_s: "单次运动监控超时,默认30秒."
+  position_tolerance_mm: "完成定位的位置误差窗口,默认0.2mm."
+  require_base_stationary: "默认true;真实模式不允许关闭停车检查."
+  base_odom_topic: "实测底盘速度,默认/odom;有命名空间时修改."
+  base_command_topic: "底盘速度指令,默认/cmd_vel;有重映射时修改."
+  odom_timeout_s: "里程计最大允许间隔,默认0.5秒."
+  base_stationary_s: "连续静止确认时间,默认1秒."
+  base_linear_threshold_m_s: "底盘静止线速度阈值,默认0.01m/s."
+  base_angular_threshold_rad_s: "底盘静止角速度阈值,默认0.02rad/s."
   位置公式: "height_mm=(6063计数-reference计数)*mm_per_motor_rev/encoder_counts_per_rev*up_direction"
-  速度公式: "rpm=线速度mm/s*60/mm_per_motor_rev；DEC=round(rpm*512*反馈精度/1875)"
+  速度公式: "rpm=线速度mm/s*60/mm_per_motor_rev;DEC=round(rpm*512*反馈精度/1875)"
   加速度公式: "DEC=round((rps/s)*65536*反馈精度/4000000)"
 
 七_ROS接口与状态:
   服务:
-    "/lift/enable": "std_srvs/SetBool，显式使能或取消使能。"
-    "/lift/stop": "std_srvs/Trigger，停止并锁存；success只反映停机写入回执。"
-    "/lift/reset_fault": "std_srvs/Trigger，复位后不使能，并清除会话零点。"
-    "/lift/reference_here": "std_srvs/Trigger，静止下限位处记零，不执行回零运动。"
-    "/lift/move": "kinco_lift_control/MoveLift，绝对高度定位。"
-    "/lift/jog": "kinco_lift_control/JogLift，有限相对点动。"
+    "/lift/enable": "std_srvs/SetBool,显式使能或取消使能."
+    "/lift/stop": "std_srvs/Trigger,停止并锁存;success只反映停机写入回执."
+    "/lift/reset_fault": "std_srvs/Trigger,复位后不使能,并清除会话零点."
+    "/lift/reference_here": "std_srvs/Trigger,静止下限位处记零,不执行回零运动."
+    "/lift/move": "kinco_lift_control/MoveLift,绝对高度定位."
+    "/lift/jog": "kinco_lift_control/JogLift,有限相对点动."
   话题:
-    "/lift/status": "std_msgs/String，JSON状态，可用rostopic echo查看。"
-    "/lift/position_mm": "std_msgs/Float64，已有有效零点时才发布。"
-    "/lift/busy": "std_msgs/Bool，定位未完成或尚未确认停稳。"
+    "/lift/status": "std_msgs/String,JSON状态,可用rostopic echo查看."
+    "/lift/position_mm": "std_msgs/Float64,已有有效零点时才发布."
+    "/lift/busy": "std_msgs/Bool,定位未完成或尚未确认停稳."
   状态字段:
-    connected: "通信可用；不单独代表允许运动。"
-    enabled: "本程序的轴使能状态。"
-    busy: "目标未完成或仍在确认停稳。"
-    stopping: "已请求停止，但反馈尚未证明停稳。"
-    referenced: "本会话是否有有效下限位零点。"
-    position_counts: "6063实际位置原始计数。"
-    position_mm: "相对下限位零点的高度；未知时为null。"
-    target_mm: "当前/最近目标高度；无参考的点动可能为null。"
-    velocity_raw: "606C内部速度单位，不是直接rpm。"
-    statusword: "6041状态字，以十进制数发布，可转换为十六进制查手册。"
-    digital_inputs: "60FD输入状态；bit0为负限位、bit1为正限位。"
-    lower_limit: "按up_direction映射后的下限位有效状态。"
-    upper_limit: "按up_direction映射后的上限位有效状态。"
-    error_status: "2601故障状态，非零时需要排查。"
-    emcy: "接收的CANopen紧急错误码。"
-    stop_latched: "停止/故障锁存，不能直接再次下发运动。"
-    message: "最近停止或故障原因，报错文本保留英文以便定位代码。"
-    simulate: "是否内存模拟，true时不接触实物CAN。"
-    motion_allowed: "仅表示配置总开关motion_enabled，其他校验仍可能拒绝运动。"
-    parking_interlock: "停车检查的禁止原因，空字符串表示当前检查通过。"
-  到位判断: "服务accepted=true不是到位；需busy=false、无故障且位置符合目标，取消/停止不能当成正常完成。"
+    connected: "通信可用;不单独代表允许运动."
+    enabled: "本程序的轴使能状态."
+    busy: "目标未完成或仍在确认停稳."
+    stopping: "已请求停止,但反馈尚未证明停稳."
+    referenced: "本会话是否有有效下限位零点."
+    position_counts: "6063实际位置原始计数."
+    position_mm: "相对下限位零点的高度;未知时为null."
+    target_mm: "当前/最近目标高度;无参考的点动可能为null."
+    velocity_raw: "606C内部速度单位,不是直接rpm."
+    statusword: "6041状态字,以十进制数发布,可转换为十六进制查手册."
+    digital_inputs: "60FD输入状态;bit0为负限位,bit1为正限位."
+    lower_limit: "按up_direction映射后的下限位有效状态."
+    upper_limit: "按up_direction映射后的上限位有效状态."
+    error_status: "2601故障状态,非零时需要排查."
+    emcy: "接收的CANopen紧急错误码."
+    stop_latched: "停止/故障锁存,不能直接再次下发运动."
+    message: "最近停止或故障原因,报错文本保留英文以便定位代码."
+    simulate: "是否内存模拟,true时不接触实物CAN."
+    motion_allowed: "仅表示配置总开关motion_enabled,其他校验仍可能拒绝运动."
+    parking_interlock: "停车检查的禁止原因,空字符串表示当前检查通过."
+  到位判断: "服务accepted=true不是到位;需busy=false,无故障且位置符合目标,取消/停止不能当成正常完成."
 
 八_常见问题:
   "找不到gs_usb":
-    原因: "Jetson内核未提供此模块，或适配器固件/型号不匹配。"
-    处理: "核对Jetson内核与适配器；安装Python包不能代替内核驱动。"
+    原因: "Jetson内核未提供此模块,或适配器固件/型号不匹配."
+    处理: "核对Jetson内核与适配器;安装Python包不能代替内核驱动."
   "找不到can0":
-    处理: "检查USB识别、gs_usb和ip -details link show；不要把ttyUSB串口当CAN。"
+    处理: "检查USB识别,gs_usb和ip -details link show;不要把ttyUSB串口当CAN."
   "SDO timeout":
-    处理: "检查24V逻辑/动力供电、CAN_H/L/GND、站号、波特率、终端电阻及其他主站。"
-    后续: "排查后重启本节点；不在不明结果下重复运动指令。"
+    处理: "检查24V逻辑/动力供电,CAN_H/L/GND,站号,波特率,终端电阻及其他主站."
+    后续: "排查后重启本节点;不在不明结果下重复运动指令."
   "SDO abort":
-    处理: "按打印的对象地址及32位中止码查驱动器手册，确认固件对象及数据类型。"
+    处理: "按打印的对象地址及32位中止码查驱动器手册,确认固件对象及数据类型."
   "Motion locked":
-    处理: "核实配置标定和三个许可开关；未装好限位时不能只改布尔值绕过。"
+    处理: "核实配置标定和三个许可开关;未装好限位时不能只改布尔值绕过."
   "Chassis odometry missing/stale":
-    处理: "启动底盘里程计，核对base_odom_topic及更新频率，并停车等待静止确认。"
+    处理: "启动底盘里程计,核对base_odom_topic及更新频率,并停车等待静止确认."
   "Requested direction blocked":
-    处理: "当前方向的限位有效；检查方向与输入极性，不继续向触发方向运动。"
+    处理: "当前方向的限位有效;检查方向与输入极性,不继续向触发方向运动."
   "No lower reference":
-    处理: "在实际下限位停稳后调用reference_here；禁止把任意高度当零点。"
+    处理: "在实际下限位停稳后调用reference_here;禁止把任意高度当零点."
   "CAN session invalid":
-    处理: "本次事务结果不确定，不能直接reset恢复；检查通信后重启节点并重建参考。"
+    处理: "本次事务结果不确定,不能直接reset恢复;检查通信后重启节点并重建参考."
   "busy在stop后仍为true":
-    处理: "程序正在等反馈确认停稳；先检查状态及实际运动，不能当作已停机。"
+    处理: "程序正在等反馈确认停稳;先检查状态及实际运动,不能当作已停机."
   "复位后不能直接定位":
-    原因: "复位撤销了旧零点且不会自动使能。"
-    处理: "重新使能，并在下限位记录参考后再定位。"
+    原因: "复位撤销了旧零点且不会自动使能."
+    处理: "重新使能,并在下限位记录参考后再定位."
 
 九_已验证与边界:
-  验证: "31项内存模拟测试通过；Python3.8语法和ROS启动XML检查通过。"
-  尚未验证: "未在Jetson运行catkin/ROS、未与实际FD125或电机联调。"
-  时序: "SDO轮询用于低频单轴梯形定位，不提供1kHz插补或多轴同步。"
-  节点保护: "100C=200ms、100D=3、6007=1；约600ms是最后有效询问后的设定超时，不是整机急停响应保证。"
-  不自动修改: "电机库、IO功能/极性、编码器、制动电阻、电池阈值、持久软限位及底盘启动文件。"
-  模型衔接: "暂不发布升降joint_states；原URDF的arm_joint为fixed，后续需按实物建移动关节。"
-  后续集成: "可将/lift/busy接入任务调度或twist_mux锁；本包目前仅检查停车并在检测到运动时停止升降。"
+  验证: "31项内存模拟测试通过;Python3.8语法和ROS启动XML检查通过."
+  尚未验证: "未在Jetson运行catkin/ROS,未与实际FD125或电机联调."
+  时序: "SDO轮询用于低频单轴梯形定位,不提供1kHz插补或多轴同步."
+  节点保护: "100C=200ms,100D=3,6007=1;约600ms是最后有效询问后的设定超时,不是整机急停响应保证."
+  不自动修改: "电机库,IO功能/极性,编码器,制动电阻,电池阈值,持久软限位及底盘启动文件."
+  模型衔接: "暂不发布升降joint_states;原URDF的arm_joint为fixed,后续需按实物建移动关节."
+  后续集成: "可将/lift/busy接入任务调度或twist_mux锁;本包目前仅检查停车并在检测到运动时停止升降."

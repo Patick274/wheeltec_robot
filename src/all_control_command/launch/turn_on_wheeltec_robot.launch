@@ -30,7 +30,7 @@
     </include>
   </group>
 
-  <!-- 发布用于建图、导航的TF关系与小车外形可视化 -->
+  <!-- 发布用于建图,导航的TF关系与小车外形可视化 -->
   <include file="$(find turn_on_wheeltec_robot)/launch/robot_model_visualization.launch" unless="$(arg repeat)">
     <arg name="car_mode" value="$(arg car_mode)"/>
   </include>

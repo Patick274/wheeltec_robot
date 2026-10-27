@@ -34,20 +34,20 @@ static void fuseAndPublish(const sensor_msgs::LaserScan &msg1,
   size_t node_count = msg1.ranges.size();
 
   sensor_msgs::LaserScan scan_msg;
-  // 用两帧里更早的时间戳，保证该时刻的 tf 已可用，避免 rviz/gmapping 外推导致频闪
+  // 用两帧里更早的时间戳,保证该时刻的 tf 已可用,避免 rviz/gmapping 外推导致频闪
   scan_msg.header.stamp = (msg1.header.stamp < msg2.header.stamp) ? msg1.header.stamp : msg2.header.stamp;
   scan_msg.header.frame_id = frame_id;
   scan_msg.angle_min = angle_min;
   scan_msg.angle_max = angle_max;
   scan_msg.angle_increment = angle_increment;
-  scan_msg.scan_time = (msg1.scan_time > 0) ? msg1.scan_time : 0.05;  // 一圈的时间，约 0.05s@20Hz
+  scan_msg.scan_time = (msg1.scan_time > 0) ? msg1.scan_time : 0.05;  // 一圈的时间,约 0.05s@20Hz
   scan_msg.time_increment = scan_msg.scan_time / (double)(node_count - 1);
   scan_msg.range_min = std::min(msg1.range_min, msg2.range_min);
   scan_msg.range_max = std::max(msg1.range_max, msg2.range_max);
   scan_msg.ranges.assign(node_count, std::numeric_limits<float>::infinity());
   scan_msg.intensities.assign(node_count, 0.0f);
 
-  // 把某一帧雷达投影到融合坐标系，取每格最近距离
+  // 把某一帧雷达投影到融合坐标系,取每格最近距离
   auto project = [&](const sensor_msgs::LaserScan &scan, double rotate, double xoff, double yoff) {
     for (size_t i = 0; i < scan.ranges.size(); i++) {
       float r = scan.ranges[i];

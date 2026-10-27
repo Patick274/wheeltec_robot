@@ -1,7 +1,7 @@
 <launch>
     <!--打开手柄控制节点
         注意: 输出话题由 cmd_vel 重映射为 cmd_vel_teleop,
-        即先交给 twist_mux 仲裁(高优先级), 再由 mux 统一发给底盘。
+        即先交给 twist_mux 仲裁(高优先级), 再由 mux 统一发给底盘.
         twist_mux 节点在底盘启动文件 base_serial.launch 中启动 -->
     <node pkg="wheeltec_joy" type="joycontrol" name="joy_control" output="screen">
        <param name="axis_linear"   type="int"      value="1" />

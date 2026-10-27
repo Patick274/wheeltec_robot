@@ -1,4 +1,4 @@
-"""方向键/速度模式/分区/看门狗测试，全程内存模拟，不打开CAN或ROS。"""
+"""方向键/速度模式/分区/看门狗测试,全程内存模拟,不打开CAN或ROS."""
 import pathlib
 import sys
 import time
@@ -128,7 +128,7 @@ class KeyboardControllerTests(unittest.TestCase):
         self.axis.keyboard_command(0)
 
     def place(self, position):
-        # 测试夹具模拟已经过的行程，不把测试瞬移当作真实反馈。
+        # 测试夹具模拟已经过的行程,不把测试瞬移当作真实反馈.
         self.bus.position = position
         self.axis.feedback_position = position
         self.axis.feedback_time = time.monotonic()

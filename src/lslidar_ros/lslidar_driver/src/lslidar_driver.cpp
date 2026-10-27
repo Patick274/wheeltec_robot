@@ -962,9 +962,9 @@ namespace lslidar_driver {
                 firings.azimuth[blk_idx * 32 + scan_fir_idx] = firings.azimuth[blk_idx * 32 + scan_fir_idx] % 36000;
 
                 /*
-                // calibration azimuth ，1°
+                // calibration azimuth ,1°
               if ("c32_2" == c32_type) {
-                    // -----结果是否是正数 ？
+                    // -----结果是否是正数 ?
                     int adjust_diff = adjust_angle[1] - adjust_angle[0];
                     if (adjust_diff > 300 && adjust_diff < 460) {
                         // fpga :v 2.7
@@ -1168,9 +1168,9 @@ namespace lslidar_driver {
         for (int blk_idx = 0; blk_idx < BLOCKS_PER_PACKET; ++blk_idx) {
             for (int scan_fir_idx = 0; scan_fir_idx < SCANS_PER_FIRING_C32; ++scan_fir_idx) {
 
-                // calibration azimuth ，1°
+                // calibration azimuth ,1°
                 if ("c32_2" == c32_type) {
-                    // -----结果是否是正数 ？
+                    // -----结果是否是正数 ?
                     int adjust_diff = adjust_angle[1] - adjust_angle[0];
                     if (adjust_diff > 300 && adjust_diff < 460) {
                         // fpga :v 2.7

@@ -4,7 +4,7 @@
 
 # ---------- 这个目录是干什么的 ----------
 # 把"小车控制相关"的 launch 文件集中拷贝到 launch/ 下,
-# 不用记各个功能包的路径,进这一个目录就能启动所有常用功能。
+# 不用记各个功能包的路径,进这一个目录就能启动所有常用功能.
 #
 # 用法: cd ~/wheeltec_robot/src/all_control_command/launch
 #       roslaunch <文件名>.launch [参数]
@@ -30,16 +30,16 @@
 # 手动建图:   roslaunch mapping.launch
 #             (另开终端存图: rosrun map_server map_saver -f ~/map名)
 # 建图命令
-# 1）gmapping（默认，轮子里程计依赖，适合室内）
+# 1)gmapping(默认,轮子里程计依赖,适合室内)
 #roslaunch all_control_command mapping.launch mapping_mode:=gmapping
 
-# 2）hector 激光无里程计建图，适合里程计不准场景
+# 2)hector 激光无里程计建图,适合里程计不准场景
 #roslaunch all_control_command mapping.launch mapping_mode:=hector
 
-# 3）karto 图优化建图
+# 3)karto 图优化建图
 #roslaunch all_control_command mapping.launch mapping_mode:=karto
 
-# 4）cartographer谷歌建图（注意！必须先source cartographer编译后的环境）
+# 4)cartographer谷歌建图(注意!必须先source cartographer编译后的环境)
 #roslaunch all_control_command mapping.launch mapping_mode:=cartographer
 
 # cartographer 存图: bash ~/wheeltec_robot/src/turn_on_wheeltec_robot/scripts/save_cartographer_map.sh 地图名
@@ -48,10 +48,10 @@
 #             navigation.launch local_planner:=dwa
 
 # ---------- 重要维护提醒 ----------
-# 本目录是【拷贝件】,原件在:
+# 本目录是[拷贝件],原件在:
 #   turn_on_wheeltec_robot/launch/  (前5个)
 #   wheeltec_robot_rc/launch/       (keyboard_teleop.launch)
 #   wheeltec_joy_control/launch/    (joy_control.launch)
-# 修改 launch 请改原件,再重新拷贝到本目录覆盖,否则两处会不同步。
-# 2026-09-03 拷贝时已包含: local_planner 三级透传、cartographer 组建图、
-# navigation.launch 的 default→value 修复。
+# 修改 launch 请改原件,再重新拷贝到本目录覆盖,否则两处会不同步.
+# 2026-09-03 拷贝时已包含: local_planner 三级透传,cartographer 组建图,
+# navigation.launch 的 default→value 修复.

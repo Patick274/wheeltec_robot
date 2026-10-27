@@ -1,27 +1,27 @@
-#   twist的两个文件分工如下：
+#   twist的两个文件分工如下:
 
-#   twist_mux —— 仲裁器本体
+#   twist_mux -- 仲裁器本体
 
-#   就是那个"多路开关"节点。它同时订阅多个速度话题（我们配了 cmd_vel_teleop 和 cmd_vel_nav)，按照 twist_mux.yaml 里的优先级规则，任一时刻只选一路转发到底盘的 cmd_vel。
+#   就是那个"多路开关"节点.它同时订阅多个速度话题(我们配了 cmd_vel_teleop 和 cmd_vel_nav),按照 twist_mux.yaml 里的优先级规则,任一时刻只选一路转发到底盘的 cmd_vel.
 
-#   包里的主要内容：
-#   - src/twist_mux.cpp：仲裁核心逻辑——监听各输入话题的活跃状态，高优先级抢占、超时自动让位
-#   - src/twist_mux_diagnostics.cpp：诊断信息发布（在 rqt/diagnostic 里能看到当前哪一路在输出）
-#   - scripts/joystick_relay.py：一个附带小工具（手柄优先级按键切换，我们没用到）
-#   - test/：官方测试
+#   包里的主要内容:
+#   - src/twist_mux.cpp:仲裁核心逻辑--监听各输入话题的活跃状态,高优先级抢占,超时自动让位
+#   - src/twist_mux_diagnostics.cpp:诊断信息发布(在 rqt/diagnostic 里能看到当前哪一路在输出)
+#   - scripts/joystick_relay.py:一个附带小工具(手柄优先级按键切换,我们没用到)
+#   - test/:官方测试
   
-#   编译产物就是 devel/lib/twist_mux/twist_mux 这个可执行文件，base_serial.launch 里启动的就是它。
+#   编译产物就是 devel/lib/twist_mux/twist_mux 这个可执行文件,base_serial.launch 里启动的就是它.
 
-#   twist_mux_msgs —— 消息定义包
+#   twist_mux_msgs -- 消息定义包
 
-#   它没有任何可执行节点，只定义了 twist_mux 需要用到的自定义消息/动作类型：
+#   它没有任何可执行节点,只定义了 twist_mux 需要用到的自定义消息/动作类型:
 
 #   twist_mux_msgs/
 #   └── action/
 #       └── JoyPriority.action    # 配合 joystick_relay.py 用的 action 定义
 
-#   为什么必须单独存在：ROS 的规矩是消息定义必须独立成包，这样别的包想跟 twist_mux 通信时，只需依赖这个轻量的消息包，而不必编译整个仲裁器。twist_mux 的 CMakeLists 里
-#   find_package 依赖它，少了它 twist_mux 编译就会报找不到头文件——所以两个缺一不可。
+#   为什么必须单独存在:ROS 的规矩是消息定义必须独立成包,这样别的包想跟 twist_mux 通信时,只需依赖这个轻量的消息包,而不必编译整个仲裁器.twist_mux 的 CMakeLists 里
+#   find_package 依赖它,少了它 twist_mux 编译就会报找不到头文件--所以两个缺一不可.
 
-#   一句话：twist_mux_msgs 是"字典"（定义通信用的词汇）,twist_mux 是"干活的"（仲裁逻辑本身）。日常使用中你不需要碰它们任何一个，配置都集中在
-#   wheeltec_joy_control/config/twist_mux.yaml。
+#   一句话:twist_mux_msgs 是"字典"(定义通信用的词汇),twist_mux 是"干活的"(仲裁逻辑本身).日常使用中你不需要碰它们任何一个,配置都集中在
+#   wheeltec_joy_control/config/twist_mux.yaml.

@@ -26,7 +26,7 @@ LSM10 * LSM10::instance()
 }
 
 /*
- * 构造函数: 初始化参数、创建发布器、打开串口、启动两个工作线程
+ * 构造函数: 初始化参数,创建发布器,打开串口,启动两个工作线程
  */
 LSM10::LSM10()
 {
@@ -40,7 +40,7 @@ LSM10::LSM10()
   pub_ = n_.advertise<sensor_msgs::LaserScan>(scan_topic_, 3);
   device_pub = n_.advertise<lsm10_v2::difop>("difop_information", 100);
 
-  /* 获取串口对象并初始化(打开串口、配置参数) */
+  /* 获取串口对象并初始化(打开串口,配置参数) */
   serial_ = LSIOSR::instance(serial_port_, baud_rate_);
   code = serial_->init();
   if(code != 0)
@@ -158,7 +158,7 @@ double LSM10::getRPM()
  *   [4-5]  转速相关字段, 2500000 / 值 得到转速
  *   [6-89] 42 个距离点, 每个点 2 字节, 值 / 1000 得到米; 0xFFFF 表示该点无效(无回波)
  *
- * 每帧 42 点覆盖 15°, 所以一圈 360° 需要 24 帧共 1008 点。
+ * 每帧 42 点覆盖 15°, 所以一圈 360° 需要 24 帧共 1008 点.
  */
 void LSM10::recvThread()
 {
@@ -296,7 +296,7 @@ void LSM10::recvThread()
         else if (k == 0xA5 && y == 0xFF && k_1 == 00 && y_1 == 0x5A)
         {
             /* 命中"设备信息包"帧头(0xA5 0xFF 0x00 0x5A)
-             * 该包包含温度、高压、转速等信息, 此处暂未启用, 保留示例代码 */
+             * 该包包含温度,高压,转速等信息, 此处暂未启用, 保留示例代码 */
             /*lsm10_v2::difopPtr Difop_data = lsm10_v2::difopPtr(
                         new lsm10_v2::difop());
 

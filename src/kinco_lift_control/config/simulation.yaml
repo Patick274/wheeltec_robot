@@ -1,4 +1,4 @@
-# 仅simulate:=true时由launch加载；这些是离线测试参数，禁止当作实机标定照抄。
+# 仅simulate:=true时由launch加载;这些是离线测试参数,禁止当作实机标定照抄.
 encoder_counts_per_rev: 65536
 mm_per_motor_rev: 2.25
 up_direction: 1

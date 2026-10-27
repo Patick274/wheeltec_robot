@@ -1,7 +1,7 @@
-"""不依赖ROS的回归测试：在包目录执行python3 -m unittest discover -s tests -v。
+"""不依赖ROS的回归测试:在包目录执行python3 -m unittest discover -s tests -v.
 
-覆盖报文字节、数据类型、换算、运动许可、停车、限位、故障及停止状态。
-测试使用内存模拟器，不向实物设备发送任何消息。
+覆盖报文字节,数据类型,换算,运动许可,停车,限位,故障及停止状态.
+测试使用内存模拟器,不向实物设备发送任何消息.
 """
 import math
 import pathlib
@@ -301,6 +301,54 @@ class ParkingTests(unittest.TestCase):
         self.assertIn('command', p.reason())
         p.command(math.nan, 0, 0)
         self.assertIn('command', p.reason())
+
+    def test_micro_command_below_old_threshold_still_blocks(self):
+        """任意非零指令都表明运动意图,即便幅值低于旧的0.01测量阈值."""
+        p = ParkingInterlock(stationary_s=0.001)
+        p.odometry(0, 0, 0)
+        time.sleep(0.005)
+        p.command(0.005, 0, 0)
+        self.assertIn('command', p.reason())
+        p.command(0, 0, 0.005)
+        self.assertIn('command', p.reason())
+
+    def test_noise_floor_below_is_stationary(self):
+        """实测在噪声地板以下视为静止;原先0.01阈值把0.005~0.02之间的微速也当静止."""
+        p = ParkingInterlock(stationary_s=0.001)
+        p.odometry(0.003, 0, 0)
+        time.sleep(0.005)
+        self.assertEqual(p.reason(), '')
+
+    def test_micro_motion_above_noise_floor_is_not_stationary(self):
+        """介于噪声地板与明确运动阈值之间,按不可信对待——要求重新累计静止时间."""
+        p = ParkingInterlock(stationary_s=0.001)
+        p.odometry(0.015, 0, 0)
+        time.sleep(0.005)
+        self.assertNotEqual(p.reason(), '')
+
+    def test_micro_angular_above_noise_floor_is_not_stationary(self):
+        p = ParkingInterlock(stationary_s=0.001)
+        p.odometry(0, 0, 0.015)
+        time.sleep(0.005)
+        self.assertNotEqual(p.reason(), '')
+
+    def test_command_stop_but_inertia_motion_still_blocks(self):
+        """指令已归零但实测仍有超噪声地板的运动,不能算静止."""
+        p = ParkingInterlock(stationary_s=0.001)
+        p.command(0.05, 0, 0)
+        p.command(0, 0, 0)
+        p.odometry(0.015, 0, 0)
+        time.sleep(0.005)
+        self.assertNotEqual(p.reason(), '')
+
+    def test_definite_motion_threshold_blocks_immediately(self):
+        """实测明显超过motion_threshold立即判运动."""
+        p = ParkingInterlock(stationary_s=0.001)
+        p.odometry(0, 0, 0)
+        time.sleep(0.005)
+        self.assertEqual(p.reason(), '')
+        p.odometry(0.05, 0, 0)
+        self.assertNotEqual(p.reason(), '')
 
 
 if __name__ == '__main__':

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""只读通信探测工具，不需要启动ROS或编译自定义服务。
+"""只读通信探测工具,不需要启动ROS或编译自定义服务.
 
-在本包目录执行：
+在本包目录执行:
   python3 scripts/probe_drive.py --simulate
   python3 scripts/probe_drive.py --interface can0 --node-id 1
-只读对象，不使能、不写参数；探测退出后再启动正式控制节点。
+只读对象,不使能,不写参数;探测退出后再启动正式控制节点.
 """
 import argparse
 import json
 import os
 import sys
 
-# 直接从源码运行时补充模块路径；catkin安装后使用安装环境中的Python模块。
+# 直接从源码运行时补充模块路径;catkin安装后使用安装环境中的Python模块.
 source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
 if os.path.isdir(source):
     sys.path.insert(0, source)
@@ -20,7 +20,7 @@ from kinco_lift.simulator import SimulatedCan
 
 
 def main():
-    """选择真实/模拟传输，读取六项对象，输出JSON；退出时始终关闭连接。"""
+    """选择真实/模拟传输,读取六项对象,输出JSON;退出时始终关闭连接."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interface', default='can0')
     parser.add_argument('--node-id', type=int, default=1)

@@ -58,7 +58,7 @@ private:
   std::string joy_dev_name_;
   std::string joy_dev_ff_;
   double deadzone_;
-  double autorepeat_rate_;    // in Hz.  0 for no repeat. 单位为赫兹。 0表示无重复。
+  double autorepeat_rate_;    // in Hz.  0 for no repeat. 单位为赫兹. 0表示无重复.
   double coalesce_interval_;  // Defaults to 100 Hz rate limit. 默认为100 Hz速率限制
   int event_count_;
   int pub_count_;
@@ -104,8 +104,8 @@ private:
   /*! \brief Returns the device path of the first joystick that matches joy_name.
    *         If no match is found, an empty string is returned.
    */
-  /*！\Brief返回与joy_name匹配的第一个操纵杆的设备路径。
-  *如果没有匹配，则返回空字符串。
+  /*!\Brief返回与joy_name匹配的第一个操纵杆的设备路径.
+  *如果没有匹配,则返回空字符串.
   */
   std::string get_dev_by_joy_name(const std::string& joy_name)
   {
@@ -133,7 +133,7 @@ private:
         continue;
       }
       if (!S_ISCHR(stat_buf.st_mode))  // input devices are character devices, skip other
-      //输入设备是字符设备，请跳过其他
+      //输入设备是字符设备,请跳过其他
       {
         continue;
       }
@@ -184,7 +184,7 @@ public:
       if (msg->array[i].type == 1 && ff_fd_ != -1)  // TYPE_RUMBLE
       {
         // if id is zero, thats low freq, 1 is high
-       //如果id为零，则表示低频，如果id为1，则表示高
+       //如果id为零,则表示低频,如果id为1,则表示高
         joy_effect_.direction = 0;  // down
         joy_effect_.type = FF_RUMBLE;
         if (msg->array[i].id == 0)
@@ -205,7 +205,7 @@ public:
   }
 
   /// \brief Opens joystick port, reads from port and publishes while node is active
-  ///Brief打开操纵杆端口，在节点处于活动状态时从端口读取和发布
+  ///Brief打开操纵杆端口,在节点处于活动状态时从端口读取和发布
   int main(int argc, char **argv)
   {
     diagnostic_.add("Joystick Driver Status", this, &Joystick::diagnostics);

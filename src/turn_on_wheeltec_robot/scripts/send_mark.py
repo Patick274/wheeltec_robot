@@ -12,14 +12,14 @@ from move_base_msgs.msg import *
 import sys, select, termios, tty
 import time
 
-#到达目标点成功或失败的回调函数，输入参数：[3：成功， 其它：失败](4：ABORTED)
+#到达目标点成功或失败的回调函数,输入参数:[3:成功, 其它:失败](4:ABORTED)
 def pose_callback(msg):
     global try_again, index, try_again, index
-    if msg.status.status == 3 and count>0 :  #成功到达任意目标点，前往下一目标点
+    if msg.status.status == 3 and count>0 :  #成功到达任意目标点,前往下一目标点
         try_again = 1 #允许再次尝试前往尚未抵达的该目标点
        
-        #count表示当前目标点计数，index表示已完成的目标点计数
-        if index == count:                   #当index等于count时，表示所有目标点完成，重新开始巡航
+        #count表示当前目标点计数,index表示已完成的目标点计数
+        if index == count:                   #当index等于count时,表示所有目标点完成,重新开始巡航
             print ('Reach the target point '+str(index-1)+':')
             print('x:'+str(markerArray.markers[index-1].pose.position.x)+
                 ', y:'+str(markerArray.markers[index-1].pose.position.y)+
@@ -38,7 +38,7 @@ def pose_callback(msg):
             goal_pub.publish(pose)
             index += 1 #下一次要发布的目标点序号
 
-        elif index < count:                   #当index小于count时，表示还未完成所有目标点，目标巡航未完成
+        elif index < count:                   #当index小于count时,表示还未完成所有目标点,目标巡航未完成
             print ('Reach the target point '+str(index-1)+':')    
             print('x:'+str(markerArray.markers[index-1].pose.position.x)+
                 ', y:'+str(markerArray.markers[index-1].pose.position.y)+
@@ -62,7 +62,7 @@ def pose_callback(msg):
                     ', z:'+str(markerArray.markers[index-1].pose.orientation.z)+
                     ', w:'+str(markerArray.markers[index-1].pose.orientation.w)) 
 
-        #如果未尝试过前往尚未抵达的目标点，则尝试前往尚未抵达的目标点
+        #如果未尝试过前往尚未抵达的目标点,则尝试前往尚未抵达的目标点
         if try_again == 1:
             rospy.logwarn('trying reach the target point '+str(index-1)+' again!'+'\r\n'+
                           'x:'+str(markerArray.markers[index-1].pose.position.x)+
@@ -80,7 +80,7 @@ def pose_callback(msg):
             goal_pub.publish(pose)
             try_again = 0 #不允许再次尝试前往尚未抵达的该目标点
 
-        #如果已经尝试过前往尚未抵达的目标点，则前往下一个目标点
+        #如果已经尝试过前往尚未抵达的目标点,则前往下一个目标点
         elif index < len(markerArray.markers):      #若还未完成目标点
             rospy.logwarn('try reach the target point '+str(index-1)+' failed! reach next point:'+'\r\n'+
                           'x:'+str(markerArray.markers[index-1].pose.position.x)+
@@ -88,7 +88,7 @@ def pose_callback(msg):
                         ', z:'+str(markerArray.markers[index-1].pose.orientation.z)+
                         ', w:'+str(markerArray.markers[index-1].pose.orientation.w)) 
 
-            if index==count: index=0 #如果下一个目标点序号为count，说明当前目标点为最后一个目标点，下一个目标点序号应该设置为0
+            if index==count: index=0 #如果下一个目标点序号为count,说明当前目标点为最后一个目标点,下一个目标点序号应该设置为0
             pose = PoseStamped()
             pose.header.frame_id = 'map'
             pose.header.stamp = rospy.Time.now()
@@ -100,7 +100,7 @@ def pose_callback(msg):
             index += 1 #下一次要发布的目标点序号
             try_again = 1 #允许再次尝试前往尚未抵达的该目标点
 
-#rviz内NavGoal标记按下的回调函数，输入参数：按下的位置[x, y, z=0]
+#rviz内NavGoal标记按下的回调函数,输入参数:按下的位置[x, y, z=0]
 def navGoal_callback(msg):           
     global index, count
 
@@ -116,7 +116,7 @@ def navGoal_callback(msg):
     marker.action = marker.ADD #添加marker
     marker.scale.x = 0.5 #marker大小
     marker.scale.y = 0.05 #marker大小
-    marker.scale.z = 0.05 #marker大小，对于字符只有z起作用
+    marker.scale.z = 0.05 #marker大小,对于字符只有z起作用
     marker.color.a = 1 #字符透明度
     marker.color.r = 1 #字符颜色R(红色)通道
     marker.color.g = 0 #字符颜色G(绿色)通道
@@ -134,7 +134,7 @@ def navGoal_callback(msg):
     marker_number.action = marker_number.ADD #添加marker
     marker_number.scale.x = 0.5 #marker大小
     marker_number.scale.y = 0.5 #marker大小
-    marker_number.scale.z = 0.5 #marker大小，对于字符只有z起作用
+    marker_number.scale.z = 0.5 #marker大小,对于字符只有z起作用
     marker_number.color.a = 1 #字符透明度
     marker_number.color.r = 1 #字符颜色R(红色)通道
     marker_number.color.g = 0 #字符颜色G(绿色)通道
@@ -147,7 +147,7 @@ def navGoal_callback(msg):
     marker_number.text = str(count) #字符内容
     markerArray_number.markers.append(marker_number) #添加元素进数组
 
-    #markers的id不能一样，否则rviz只会识别最后一个元素
+    #markers的id不能一样,否则rviz只会识别最后一个元素
     id = 0
     for m in markerArray.markers:    #遍历marker分别给id赋值
         m.id = id
@@ -157,8 +157,8 @@ def navGoal_callback(msg):
         m.id = id
         id += 1
 
-    mark_pub.publish(markerArray) #发布markerArray，rviz订阅并进行可视化
-    mark_pub.publish(markerArray_number) #发布markerArray，rviz订阅并进行可视化
+    mark_pub.publish(markerArray) #发布markerArray,rviz订阅并进行可视化
+    mark_pub.publish(markerArray_number) #发布markerArray,rviz订阅并进行可视化
 
     #第一次添加marker时直接发布目标点
     if count == 0:
@@ -174,7 +174,7 @@ def navGoal_callback(msg):
 
     count += 1 #有几个目标点
 
-#rviz内标记按下的回调函数，输入参数：按下的位置[x, y, z=0]
+#rviz内标记按下的回调函数,输入参数:按下的位置[x, y, z=0]
 def click_callback(msg):           
     global index, count
 
@@ -189,7 +189,7 @@ def click_callback(msg):
     marker.action = marker.ADD #添加marker
     marker.scale.x = 0.2 #marker大小
     marker.scale.y = 0.05 #marker大小
-    marker.scale.z = 0.05 #marker大小，对于字符只有z起作用
+    marker.scale.z = 0.05 #marker大小,对于字符只有z起作用
     marker.color.a = 1 #字符透明度
     marker.color.r = 1 #字符颜色R(红色)通道
     marker.color.g = 0 #字符颜色G(绿色)通道
@@ -206,7 +206,7 @@ def click_callback(msg):
     marker_number.action = marker_number.ADD #添加marker
     marker_number.scale.x = 0.5 #marker大小
     marker_number.scale.y = 0.5 #marker大小
-    marker_number.scale.z = 0.5 #marker大小，对于字符只有z起作用
+    marker_number.scale.z = 0.5 #marker大小,对于字符只有z起作用
     marker_number.color.a = 1 #字符透明度
     marker_number.color.r = 1 #字符颜色R(红色)通道
     marker_number.color.g = 0 #字符颜色G(绿色)通道
@@ -219,7 +219,7 @@ def click_callback(msg):
     marker_number.text = str(count) #字符内容
     markerArray_number.markers.append(marker_number) #添加元素进数组
 
-    #markers的id不能一样，否则rviz只会识别最后一个元素
+    #markers的id不能一样,否则rviz只会识别最后一个元素
     id = 0
     for m in markerArray.markers:    #遍历marker分别给id赋值
         m.id = id
@@ -229,8 +229,8 @@ def click_callback(msg):
         m.id = id
         id += 1
     
-    mark_pub.publish(markerArray) #发布markerArray，rviz订阅并进行可视化
-    mark_pub.publish(markerArray_number) #发布markerArray，rviz订阅并进行可视化
+    mark_pub.publish(markerArray) #发布markerArray,rviz订阅并进行可视化
+    mark_pub.publish(markerArray_number) #发布markerArray,rviz订阅并进行可视化
 
     #第一次添加marker时直接发布目标点
     if count == 0:
@@ -239,8 +239,8 @@ def click_callback(msg):
         pose.header.stamp = rospy.Time.now()
         pose.pose.position.x = msg.point.x #目标点位置
         pose.pose.position.y = msg.point.y #目标点位置
-        pose.pose.orientation.z = 0 #四元数，到达目标点后小车的方向，z=sin(angle/2)
-        pose.pose.orientation.w = 1 #四元数，到达目标点后小车的方向，w=cos(angle/2)
+        pose.pose.orientation.z = 0 #四元数,到达目标点后小车的方向,z=sin(angle/2)
+        pose.pose.orientation.w = 1 #四元数,到达目标点后小车的方向,w=cos(angle/2)
         goal_pub.publish(pose)
         index += 1 #下一次要发布的目标点序号
 

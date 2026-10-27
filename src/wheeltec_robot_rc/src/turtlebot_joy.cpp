@@ -28,9 +28,9 @@
  */
 
 #include <ros/ros.h>                          // ROS核心
-#include <geometry_msgs/Twist.h>              // 速度消息 linear.x 前进，angular.z旋转
-#include <sensor_msgs/Joy.h>                  // 游戏手柄joy消息，axes摇杆，buttons按键
-#include "boost/thread/mutex.hpp"             // boost互斥锁，多线程保护共享变量
+#include <geometry_msgs/Twist.h>              // 速度消息 linear.x 前进,angular.z旋转
+#include <sensor_msgs/Joy.h>                  // 游戏手柄joy消息,axes摇杆,buttons按键
+#include "boost/thread/mutex.hpp"             // boost互斥锁,多线程保护共享变量
 #include "boost/thread/thread.hpp"
 #include "ros/console.h"                      // ROS日志输出
 

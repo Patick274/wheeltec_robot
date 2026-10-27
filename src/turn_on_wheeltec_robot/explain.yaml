@@ -3,66 +3,66 @@
 # ============================================================
 
 # 包名: turn_on_wheeltec_robot
-# 来源: Wheeltec 轮趣科技官方机器人主控包（私有，非开源包）
-# 地位: ★ 整机最核心的包——底盘驱动、TF 发布、建图/导航的总入口都在这里
+# 来源: Wheeltec 轮趣科技官方机器人主控包(私有,非开源包)
+# 地位: ★ 整机最核心的包--底盘驱动,TF 发布,建图/导航的总入口都在这里
 
 # ---------- 这个包是干什么的 ----------
-# 作用: Wheeltec 机器人的"总开关"包，负责：
-#   1. 通过串口与底层单片机(STM32)通信：下发速度指令、读取里程计/IMU/电池电压
-#   2. 发布机器人 TF 树和 URDF 模型（RViz 可视化）
-#   3. 提供一键启动建图(gmapping/hector/karto)、导航(amcl+move_base)、
+# 作用: Wheeltec 机器人的"总开关"包,负责:
+#   1. 通过串口与底层单片机(STM32)通信:下发速度指令,读取里程计/IMU/电池电压
+#   2. 发布机器人 TF 树和 URDF 模型(RViz 可视化)
+#   3. 提供一键启动建图(gmapping/hector/karto),导航(amcl+move_base),
 #      rrt 自主探索建图的 launch 文件
-#   4. 保存建好的地图（map/ 目录）
+#   4. 保存建好的地图(map/ 目录)
 
 # ---------- 核心节点 wheeltec_robot_node ----------
 # 底盘节点 (src/wheeltec_robot.cpp):
 #   订阅: /cmd_vel (geometry_msgs/Twist) → 打包成串口协议帧发给单片机
-#         （速度放大 1000 倍转整数传输，帧头 0x7B）
-#   发布: 里程计 odom、IMU(imu/data)、电池电压等，并发布 odom→base_footprint 的 TF
-#   串口: /dev/wheeltec_controller (115200)，该设备名由 udev 规则绑定生成
-# 注意: cmd_vel 前面串了 twist_mux 速度仲裁器：
-#   手柄(cmd_vel_teleop)优先级高于导航(cmd_vel_nav)，仲裁后统一输出到 cmd_vel
+#         (速度放大 1000 倍转整数传输,帧头 0x7B)
+#   发布: 里程计 odom,IMU(imu/data),电池电压等,并发布 odom→base_footprint 的 TF
+#   串口: /dev/wheeltec_controller (115200),该设备名由 udev 规则绑定生成
+# 注意: cmd_vel 前面串了 twist_mux 速度仲裁器:
+#   手柄(cmd_vel_teleop)优先级高于导航(cmd_vel_nav),仲裁后统一输出到 cmd_vel
 #   仲裁规则在 wheeltec_joy/config/twist_mux.yaml
 
 # ---------- 启动入口 ----------
 # launch 文件:
-#   turn_on_wheeltec_robot.launch: ★ 底层总启动（最常用）
+#   turn_on_wheeltec_robot.launch: ★ 底层总启动(最常用)
 #     = base_serial.launch(底盘节点+twist_mux)
 #     + robot_model_visualization.launch(URDF模型+TF)
-#     + robot_pose_ekf.launch(扩展卡尔曼滤波，发布 odom_combined 定位)
+#     + robot_pose_ekf.launch(扩展卡尔曼滤波,发布 odom_combined 定位)
 #     + teb_local_planner.launch(仅 navigation:=true 时)
 #     重要参数:
-#       car_mode:    车型，默认 mini_diff，可选 akm/mec/omni/4wd/tank 等 30 种
+#       car_mode:    车型,默认 mini_diff,可选 akm/mec/omni/4wd/tank 等 30 种
 #       navigation:  是否同时开导航(默认 false)
 #       repeat:      是否重复开启底层节点(语音建图时用)
-#   wheeltec_lidar.launch: 雷达启动，rplidar_mode 可选思岚 A1/A2/A3/S1、
-#     镭神 M10 单/双、C16 等（默认 ls_M10_double 双雷达）
-#   mapping.launch:      建图（gmapping/hector/karto 三种算法）
-#   navigation.launch:   导航（底层+雷达+map_server+amcl+send_mark）
-#     地图文件用 map_file 参数指定，默认 map/third.yaml
+#   wheeltec_lidar.launch: 雷达启动,rplidar_mode 可选思岚 A1/A2/A3/S1,
+#     镭神 M10 单/双,C16 等(默认 ls_M10_double 双雷达)
+#   mapping.launch:      建图(gmapping/hector/karto 三种算法)
+#   navigation.launch:   导航(底层+雷达+map_server+amcl+send_mark)
+#     地图文件用 map_file 参数指定,默认 map/third.yaml
 #   rrt_slam.launch:     配合 rrt_exploration 包的自主探索建图
-#   robot_model_visualization.launch: 只发布模型和 TF（RViz 看车用）
+#   robot_model_visualization.launch: 只发布模型和 TF(RViz 看车用)
 #   rviz_nav_console.launch: RViz 多点导航控制台
 
 # ---------- 目录结构 ----------
 # 目录说明:
 #   src/wheeltec_robot.cpp + include/wheeltec_robot.h: ★ 底盘串口通信节点
-#   src/Quaternion_Solution.cpp: 陀螺仪姿态解算（欧拉角→四元数）
+#   src/Quaternion_Solution.cpp: 陀螺仪姿态解算(欧拉角→四元数)
 #   launch/include/: 被总 launch include 的子模块
 #     base_serial.launch:        底盘节点 + twist_mux 速度仲裁
-#     teb/dwa_local_planner.launch: 两种局部规划器（teb 效果更好，默认 teb）
+#     teb/dwa_local_planner.launch: 两种局部规划器(teb 效果更好,默认 teb)
 #     robot_pose_ekf.launch:     里程计+IMU 的 EKF 融合定位
 #     algorithm_gmapping/hector/karto.launch: 三种建图算法
 #     amcl.launch:               导航定位
-#     velocity_smoother.launch:  速度平滑（可选，默认不开）
+#     velocity_smoother.launch:  速度平滑(可选,默认不开)
 #   costmap_common_params/: 30 种车型各自的代价地图+teb 参数
-#     （按 car_mode 选择对应目录加载，bs=思岚雷达版 dl=镭神雷达版等）
-#   param_common/: 所有车型共用的 move_base、costmap、dwa 参数
-#   map/: 建好的地图(.pgm+.yaml)，navigation.launch 从这里加载
+#     (按 car_mode 选择对应目录加载,bs=思岚雷达版 dl=镭神雷达版等)
+#   param_common/: 所有车型共用的 move_base,costmap,dwa 参数
+#   map/: 建好的地图(.pgm+.yaml),navigation.launch 从这里加载
 #   urdf/: 各车型的机器人模型文件
-#   scripts/wheeltec_udev.sh: ★ 串口设备绑定脚本，把 ttyUSB*
-#     按厂商ID/序列号绑定成固定名字 /dev/wheeltec_controller、
-#     /dev/wheeltec_lidar1、/dev/wheeltec_lidar2（需 sudo 运行，只装一次）
+#   scripts/wheeltec_udev.sh: ★ 串口设备绑定脚本,把 ttyUSB*
+#     按厂商ID/序列号绑定成固定名字 /dev/wheeltec_controller,
+#     /dev/wheeltec_lidar1,/dev/wheeltec_lidar2(需 sudo 运行,只装一次)
 #   scripts/send_mark.py: RViz 上显示导航目标点标记
 #   scripts/rviz_nav_console.py: 多点导航控制台
 #   scripts/run_square.py: 让车走正方形的测试脚本
@@ -73,33 +73,33 @@
 #   建图:       roslaunch turn_on_wheeltec_robot mapping.launch
 #   导航:       roslaunch turn_on_wheeltec_robot navigation.launch
 #   自主探索:   roslaunch turn_on_wheeltec_robot rrt_slam.launch
-#   绑定串口:   sudo bash scripts/wheeltec_udev.sh（新电脑只需执行一次）
+#   绑定串口:   sudo bash scripts/wheeltec_udev.sh(新电脑只需执行一次)
 
-# ---------- 常见问题（2026-08-27 已逐项排查核实） ----------
+# ---------- 常见问题(2026-08-27 已逐项排查核实) ----------
 # 常见问题:
 #   - 底盘连不上/无 odom:
-#     [已核实] udev 精确规则已存在（/etc/udev/rules.d/99-wheeltec_lidar.rules
-#     中 serial=0001→wheeltec_controller、0004→lidar1、0002→lidar2），无需重跑
-#     wheeltec_udev.sh。若 /dev/wheeltec_controller 不存在，先检查底盘是否上电、
-#     USB 是否插好（lsusb 应看到 10c4:ea60 设备）。
+#     [已核实] udev 精确规则已存在(/etc/udev/rules.d/99-wheeltec_lidar.rules
+#     中 serial=0001→wheeltec_controller,0004→lidar1,0002→lidar2),无需重跑
+#     wheeltec_udev.sh.若 /dev/wheeltec_controller 不存在,先检查底盘是否上电,
+#     USB 是否插好(lsusb 应看到 10c4:ea60 设备).
 #     [遗留风险] /etc/udev/rules.d/ 下还有一个多余的兜底规则
-#     99-wheeltec-lidar.rules（横杠版，不带 serial 匹配），会把任何插入的
-#     10c4:ea60 设备都绑成 wheeltec_lidar1，可能抢占底盘控制器的绑定。
+#     99-wheeltec-lidar.rules(横杠版,不带 serial 匹配),会把任何插入的
+#     10c4:ea60 设备都绑成 wheeltec_lidar1,可能抢占底盘控制器的绑定.
 #     如需清理: sudo rm /etc/udev/rules.d/99-wheeltec-lidar.rules
 #     && sudo udevadm control --reload-rules
 #   - 导航不走/乱走:
-#     [已核实] 本车车型为 mini_diff，与 turn_on_wheeltec_robot.launch 的
-#     car_mode 默认值一致，costmap/teb 参数会正确加载 param_mini_diff/，
-#     无车型不匹配问题。换车型时才需要改 car_mode 参数。
+#     [已核实] 本车车型为 mini_diff,与 turn_on_wheeltec_robot.launch 的
+#     car_mode 默认值一致,costmap/teb 参数会正确加载 param_mini_diff/,
+#     无车型不匹配问题.换车型时才需要改 car_mode 参数.
 #   - 定位漂移:
-#     [已核实] 本车使用 gmapping 建图，is_cartographer 默认 false，
-#     robot_pose_ekf 正常参与融合，配置正确无需改动。
-#     仅当改用 cartographer 建图时才需设 is_cartographer:=true 关掉 ekf。
+#     [已核实] 本车使用 gmapping 建图,is_cartographer 默认 false,
+#     robot_pose_ekf 正常参与融合,配置正确无需改动.
+#     仅当改用 cartographer 建图时才需设 is_cartographer:=true 关掉 ekf.
 #   - 导航时手柄无效:
-#     [已核实] 链路完整且优先级正确，无需修复：
+#     [已核实] 链路完整且优先级正确,无需修复:
 #     手柄 joycontrol → cmd_vel_teleop(priority=100) ┐
 #                                                     ├→ twist_mux → cmd_vel → 底盘
 #     move_base → cmd_vel_nav(priority=10, teb launch ┘
-#     中已 remap)。手柄松手 0.5s(timeout) 后导航自动接管。
-#     注意 twist_mux.yaml 在 wheeltec_joy 包内（目录名 wheeltec_joy_control，
-#     但 package.xml 的包名是 wheeltec_joy，$(find wheeltec_joy) 写法正确）
+#     中已 remap).手柄松手 0.5s(timeout) 后导航自动接管.
+#     注意 twist_mux.yaml 在 wheeltec_joy 包内(目录名 wheeltec_joy_control,
+#     但 package.xml 的包名是 wheeltec_joy,$(find wheeltec_joy) 写法正确)

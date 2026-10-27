@@ -71,14 +71,14 @@ void wheeltec_joy::callback(const sensor_msgs::Joy::ConstPtr& Joy) //键值回�
     dir=1;
     vlinear_x.data=0;
    }
-   //判断左转右转，大于0为左转，小于0为右转
+   //判断左转右转,大于0为左转,小于0为右转
    if(vangle_key>0)       vlinear_z.data=vangular;
    else if(vangle_key<0)  vlinear_z.data=-vangular; 
    else vlinear_z.data=0;
    //处理数据
-   if(Joy->buttons[1]==1) //按下B键时，切换为麦轮车，可左右平移
+   if(Joy->buttons[1]==1) //按下B键时,切换为麦轮车,可左右平移
      flag_mec=1;
-   if(Joy->buttons[0]==1) //按下A键时，恢复正常转向模式
+   if(Joy->buttons[0]==1) //按下A键时,恢复正常转向模式
      flag_mec=0;
    if(flag_mec) 
    {

@@ -1,0 +1,119 @@
+# ============================================================
+# 工作日志 daily_10_27 (2026-10-27)
+# ============================================================
+
+date: 2026-10-27
+robot: wheeltec senior + Kinco FD125 升降柱 (SMK60S-0040 电机, 4190mm 行程, 24V 供电)
+scope: 接手 2026-10-26 交接清单, 完成 A→G 阶段中除真实底盘联动外的全部验证, 修复 R1/R2/R3
+
+# ---------- 背景 ----------
+背景:
+  - 接手文件: Jetson升降控制-后续验证与AI交接清单-20261027.md
+  - 起点: Jetson 编译通过但未实机联调; ROS 隔离仿真端口告警 11311 vs 11321
+  - 实物: Kvaser Leaf Light v2 + can0 + FD125 站号1, 实测下端参考 147599, 上端 122303105
+  - 门禁: lift.yaml 四项 motion/commissioning/drive_limits/keyboard 全 false 起步
+
+# ---------- 阶段结论 ----------
+阶段结论:
+  A_环境: PASS  Ubuntu 20.04.6 / aarch64 / ROS Noetic / Python 3.8.10 / g++ 9.4.0
+  B_单测: PASS  144/144 通过, 含 test_chassis_gate C++ 实际编译执行, 无 skip
+  C_隔离仿真: PASS  C01-C13 通过; C08/C14/C15 由 B 阶段单测覆盖
+  D_CAN诊断: PASS  Kvaser 识别, can0 从 DOWN/STOPPED 起到 ERROR-ACTIVE 500k
+  E_只读SDO: PASS  6063=151868 稳定, 606C 噪声 ±0.3rpm, 60FD=0x00020001 下限位触发, 6060=-4 厂家模式
+  F_修复R1R2R3: PASS  154/154 通过 (144 + R1×2 + R2×6 + R3×2)
+  G_实机最小运动: PASS  100mm @ 30mm/s (800rpm) 上行成功; 键盘模式方向键直接驱动成功
+
+# ---------- R1/R2/R3 修复内容 ----------
+修复:
+  R1_底端内缩死结:
+    问题: 正常停车在 lower+5mm 内缩, 重启后 reference_here 要求真实下限位, jog 又被 inset 拦截, 死结
+    修复: controller.py 新增 recover_to_lower_limit(rpm=50, timeout_s=10)
+          未使能/无故障/位置高于参考时下, 速度模式慢速下行至 60FD bit0 触发
+          lift_node.py 新增服务 /lift/recover_to_lower_limit (Trigger)
+    实机验证: 从 1891943 经历 4 次调用回到 150017, 下限位触发
+  R2_静止判定阈值:
+    问题: 旧 ParkingInterlock 用 0.01/0.02 单一阈值, 把微速与噪声混为一谈
+    修复: interlock.py 重写为三级阈值
+          指令 deadband: 0.001 m/s / 0.002 rad/s  (任何"有意运动"立即阻)
+          噪声地板: 0.005 m/s / 0.01 rad/s  (以下视为编码器噪声)
+          明确运动: 0.02 m/s / 0.05 rad/s  (超过即确定运动)
+          介于噪声地板与明确运动之间按可疑→moving 处理
+    lift_node.py 参数名更新为 base_linear_noise_m_s / base_linear_cmd_deadband_m_s 等
+  R3_位置模式6061核验:
+    问题: 键盘模式有 6061 核验, 位置模式没有, 模式被外部改动时不会发现
+    修复: controller.py 在 position_halting 和 busy 两分支都加 6061==1 核验
+          模式变化 → LiftError → 撤任务并故障锁存
+
+# ---------- 实机运动关键发现 ----------
+实机发现:
+  1_残留60FF导致溜车:
+    现象: lift_node 崩溃时驱动器仍在 mode 3, 60FF 速度指令未清零
+    结果: 升降从 150811 漂到 1891943 (上漂 60mm), node-guard 超时后才停
+    教训: 节点异常退出必须在 on_shutdown 钩子写 60FF=0 + 6040=0x0006
+    待办: 检查 lift_node.py 的 shutdown 路径是否覆盖所有崩溃分支
+  2_驱动器故障 SW=0x4218:
+    现象: lift_node 重启后驱动器报 fault bit, error=0x0001, error2=0x1000
+    处理: /lift/reset_fault 成功清除; 之前暂停可能因死前 CAN 写入中断
+    待办: 查 FD125 手册 2601/2602 错误码含义
+  3_键盘neutral_required:
+    现象: 直接发 +1 被静默忽略, 必须先发 0 清 neutral_required
+    文档: 已在交接清单 4.3 节描述, 但首次接入实机时需提醒
+  4_master参数缓存:
+    现象: 改了 lift.yaml 重启 sim 后 initial_top_height_m 仍是旧值
+    原因: rosparam 在 master 上持久化, roslaunch 只 load 不 delete
+    处理: rosparam delete /lift/<key> 或重启 master
+
+# ---------- 配置变更 (需要复盘是否回退) ----------
+配置变更:
+  lift.yaml:
+    - motion_enabled: false → true   (临时, 实机验证后必须改回 false)
+    - commissioning_confirmed: false → true   (临时)
+    - drive_limits_verified: false → true   (临时)
+    - keyboard_control_enabled: false → true   (临时)
+    - initial_top_height_m: 保持 null (用户 1.8 占位已回退, 等实测)
+  interlock.py:
+    - linear_threshold 默认 0.01 → 0.005 (噪声地板语义)
+    - angular_threshold 默认 0.02 → 0.01 (噪声地板语义)
+    - 新增 cmd_deadband_linear/angular, motion_threshold_linear/angular
+
+# ---------- 测试与构建 ----------
+测试:
+  单测: 154/154 PASS  (Windows 144 基线 + R1×2 + R2×6 + R3×2 新增)
+  LF: test_configuration 仍强制所有修改文件 LF, 通过
+  C++: test_chassis_gate 实际 g++ 编译运行通过, 非 skip
+
+# ---------- 现场安全确认 (G阶段已验证) ----------
+安全前置:
+  - 机械保持/防坠可靠 (用户确认)
+  - 现场人员可独立操作物理急停 (用户确认)
+  - 活动空间安全 (用户确认)
+  - 24V 供电稳定 (用户确认)
+  - 底盘静锁 (用户确认)
+  - 无其他 CAN 主站 (用户确认)
+  - 隔离 master 11321 与真实机器人 11311 隔离
+
+# ---------- 明天继续要干的事 ----------
+明天待办:
+  优先级_高:
+    - 排查"节点崩溃导致 60FF 残留"问题, 在 lift_node.py 加 atexit/finally 强制清零 60FF + 6040=6
+    - 复现并修复: 复现崩溃场景, 验证新 shutdown 路径能让电机立即停
+    - 查 FD125 手册 2601=0x0001 / 2602=0x1000 错误码含义, 看是否是已知可恢复故障
+    - 回退 lift.yaml 四项门禁到 false (今天临时开的), 或明确决定哪些可以长期 true
+  优先级_中:
+    - 实测真实初始总高度 initial_top_height_m, 填入 lift.yaml (不要再用 1.8 假值)
+    - 实机验证 R2 的 ParkingInterlock 阈值是否匹配真车编码器噪声
+    - 用真车 /odom 替换 fake_odom.py (当前是占位的假静止反馈)
+    - 验证升降慢速区边界: 下到 3060000 应自动 -100rpm, 上到 119390000 应自动减速
+  优先级_低:
+    - G 阶段后续: 高速 1000rpm 中段、端点内缩、制动距离记录
+    - 底盘-升降联动: 真车 /odom + base_motion_request/permit 联锁
+    - 高位行车稳定性单独验收
+
+# ---------- 给明天接手AI的关键提示 ----------
+接手提示:
+  - 实物 lift.yaml 当前四项门禁为 true, 复盘时先决定是否回退到 false
+  - 隔离 master 是 11321, 真实机器人 master 是 11311, 不要混
+  - 每次新终端必须 export ROS_MASTER_URI 和 ROS_HOSTNAME, 不写 .bashrc
+  - lift_node 异常退出可能让驱动器残留 60FF; 重启节点后先 reset_fault 再检查位置是否漂移
+  - 本日工作的所有代码改动已 git status 可见, 未提交, 复盘时再决定是否 commit
+  - 详细交接文件仍是 Jetson升降控制-后续验证与AI交接清单-20261027.md

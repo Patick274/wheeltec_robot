@@ -53,7 +53,7 @@ b : switch to OmniMode/CommonMode
 CTRL-C to quit
 """
 Omni = 0  # 全向移动模式
-# 全向移动模式 0=普通差分轮；1=全向麦轮模式
+# 全向移动模式 0=普通差分轮;1=全向麦轮模式
 
 # 键值对应移动/转向方向
 moveBindings = {
@@ -102,10 +102,10 @@ def vels(speed, turn):
 
 # 主函数
 if __name__ == "__main__":
-    settings = termios.tcgetattr(sys.stdin)  # 获取键值初始化，读取终端相关属性
+    settings = termios.tcgetattr(sys.stdin)  # 获取键值初始化,读取终端相关属性
 
     rospy.init_node('turtlebot_teleop')  # 创建ROS节点
-    # 创建速度话题发布者，'~cmd_vel'='节点名/cmd_vel'
+    # 创建速度话题发布者,'~cmd_vel'='节点名/cmd_vel'
     pub = rospy.Publisher('~cmd_vel', Twist, queue_size=5)
 
     x = 0  # 前进后退方向
@@ -123,7 +123,7 @@ if __name__ == "__main__":
         while (1):
             key = getKey()  # 获取键值
 
-            # 按下‘b’，切换是否为全向移动模式，全向轮/麦轮小车可以加入全向移动模式
+            # 按下'b',切换是否为全向移动模式,全向轮/麦轮小车可以加入全向移动模式
             if key == 'b':
                 Omni = ~Omni
                 if Omni:
@@ -148,7 +148,7 @@ if __name__ == "__main__":
                 speed = speed * speedBindings[key][0]
                 turn = turn * speedBindings[key][1]
                 count = 0
-                print(vels(speed, turn))  # 速度发生变化，打印出来
+                print(vels(speed, turn))  # 速度发生变化,打印出来
 
             # 空键值/'k',相关变量置0
             elif key == ' ' or key == 'k':
@@ -158,7 +158,7 @@ if __name__ == "__main__":
                 control_turn = 0
                 HorizonMove = 0
 
-            # 长期识别到不明键值，相关变量置0
+            # 长期识别到不明键值,相关变量置0
             else:
                 count = count + 1
                 if count > 4:
@@ -172,7 +172,7 @@ if __name__ == "__main__":
             target_turn = turn * th
             target_HorizonMove = speed*th
 
-            # 平滑控制，计算前进后退实际控制速度
+            # 平滑控制,计算前进后退实际控制速度
             if target_speed > control_speed:
                 control_speed = min(target_speed, control_speed + 0.1)
             elif target_speed < control_speed:
@@ -180,7 +180,7 @@ if __name__ == "__main__":
             else:
                 control_speed = target_speed
 
-            # 平滑控制，计算转向实际控制速度
+            # 平滑控制,计算转向实际控制速度
             if target_turn > control_turn:
                 control_turn = min(target_turn, control_turn + 0.5)
             elif target_turn < control_turn:
@@ -188,7 +188,7 @@ if __name__ == "__main__":
             else:
                 control_turn = target_turn
 
-            # 平滑控制，计算横向移动实际控制速度
+            # 平滑控制,计算横向移动实际控制速度
             if target_HorizonMove > control_HorizonMove:
                 control_HorizonMove = min(
                     target_HorizonMove, control_HorizonMove + 0.1)
@@ -199,7 +199,7 @@ if __name__ == "__main__":
                 control_HorizonMove = target_HorizonMove
 
             twist = Twist()  # 创建ROS速度话题变量
-            # 根据是否全向移动模式，给速度话题变量赋值
+            # 根据是否全向移动模式,给速度话题变量赋值
             if Omni == 0:  # 差速
                 twist.linear.x = control_speed
                 twist.linear.y = 0

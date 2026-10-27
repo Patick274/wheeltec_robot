@@ -1,4 +1,4 @@
-"""无第三方依赖的本包扁平标量配置核对，不是通用YAML解析器。"""
+"""无第三方依赖的本包扁平标量配置核对,不是通用YAML解析器."""
 import ast
 import pathlib
 import sys

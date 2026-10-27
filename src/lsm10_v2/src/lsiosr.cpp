@@ -45,7 +45,7 @@ LSIOSR::~LSIOSR()
  * 返回值: 0 成功, -1 失败
  *
  * Linux 下串口通过 struct termios 结构体描述, 常用字段含义:
- *   c_cflag: 控制标志(波特率、数据位、校验位、停止位等)
+ *   c_cflag: 控制标志(波特率,数据位,校验位,停止位等)
  *   c_iflag: 输入标志(是否校验输入等)
  *   c_cc[]:  特殊控制字符数组, 其中 VMIN/VTIME 用于控制 read 的超时行为
  */
@@ -129,7 +129,7 @@ int LSIOSR::setOpt(int nBits, uint8_t nEvent, int nStop)
 
   /*
    * 设置停止位(每帧数据末尾的结束位)
-   * CSTOPB 置位 => 2 个停止位; 清零 => 1 个停止位。绝大多数设备用 1 个停止位。
+   * CSTOPB 置位 => 2 个停止位; 清零 => 1 个停止位.绝大多数设备用 1 个停止位.
    */
   if (nStop == 1)
     newtio.c_cflag &= ~CSTOPB;

@@ -1,7 +1,7 @@
-"""单轴升降控制层：单位换算、使能状态机、位置指令、限位及停止锁存。
+"""单轴升降控制层:单位换算,使能状态机,位置指令,限位及停止锁存.
 
-本层不依赖ROS，既供真实节点调用，也供离线测试调用。
-FD125实际位置读6063:00；不自动使能、寻零、清故障、重连或保存EEPROM。
+本层不依赖ROS,既供真实节点调用,也供离线测试调用.
+FD125实际位置读6063:00;不自动使能,寻零,清故障,重连或保存EEPROM.
 """
 import math
 import threading
@@ -16,7 +16,7 @@ class LiftError(RuntimeError):
 
 
 def finite(value, label):
-    """拒绝NaN和无穷大，防止异常服务输入进入计数/速度计算。"""
+    """拒绝NaN和无穷大,防止异常服务输入进入计数/速度计算."""
     value = float(value)
     if not math.isfinite(value):
         raise LiftError(label + ' must be finite.')
@@ -24,12 +24,12 @@ def finite(value, label):
 
 
 class LiftConfig:
-    """读取参数快照；未知标定值保持0，由validate_motion禁止运动。"""
+    """读取参数快照;未知标定值保持0,由validate_motion禁止运动."""
     def __init__(self, params):
         self.motion_enabled = bool(params.get('motion_enabled', False))
         self.commissioned = bool(params.get('commissioning_confirmed', False))
         self.limits_verified = bool(params.get('drive_limits_verified', False))
-        # counts是驱动器有效反馈精度，不一定等于编码器铭牌上的2^位数。
+        # counts是驱动器有效反馈精度,不一定等于编码器铭牌上的2^位数.
         self.counts = finite(params.get('encoder_counts_per_rev', 0), 'encoder counts')
         self.mm_rev = finite(params.get('mm_per_motor_rev', 0), 'mm per motor rev')
         self.direction = int(params.get('up_direction', 1))
@@ -68,7 +68,7 @@ class LiftConfig:
             raise LiftError('Keyboard cruise speed exceeds configured speed cap.')
 
     def validate_motion(self, require_travel=True):
-        """同时确认运动许可、调试完成、驱动器限位和有效机械标定。"""
+        """同时确认运动许可,调试完成,驱动器限位和有效机械标定."""
         if not self.motion_enabled or not self.commissioned or not self.limits_verified:
             raise LiftError('Motion locked: verify commissioning/drive limits and enable motion in YAML.')
         if self.counts <= 0 or self.mm_rev <= 0 or (require_travel and self.travel <= 0):
@@ -77,11 +77,11 @@ class LiftConfig:
             raise LiftError('encoder_counts_per_rev must be an integer.')
 
     def velocity_raw(self, rpm):
-        """rpm -> 驱动器内部速度DEC；不能把rpm数值直接写入6081。"""
+        """rpm -> 驱动器内部速度DEC;不能把rpm数值直接写入6081."""
         return self._u32(round(finite(rpm, 'rpm') * 512 * self.counts / 1875))
 
     def acceleration_raw(self, rps_s):
-        """电机转/秒² -> 驱动器内部加速度DEC，公式取自手册第7章。"""
+        """电机转/秒² -> 驱动器内部加速度DEC,公式取自手册第7章."""
         return self._u32(round(finite(rps_s, 'acceleration') * 65536 * self.counts / 4000000))
 
     @staticmethod
@@ -92,14 +92,14 @@ class LiftConfig:
 
 
 class LiftController:
-    """维护一个轴的会话状态；所有命令串行执行，不排队叠加运动。"""
+    """维护一个轴的会话状态;所有命令串行执行,不排队叠加运动."""
     def __init__(self, sdo, config, interlock, speed_limit=None):
         self.sdo, self.cfg, self.interlock = sdo, config, interlock
         self.speed_limit = speed_limit or (lambda: self.cfg.max_rpm)
         self.lock = threading.RLock()
         self.connected = self.armed = self.busy = False
-        self.stopping = False  # 已请求停机、但尚未由反馈确认停稳。
-        # reference仅存本进程内的下限位计数；重启或异常后不能沿用旧零点。
+        self.stopping = False  # 已请求停机,但尚未由反馈确认停稳.
+        # reference仅存本进程内的下限位计数;重启或异常后不能沿用旧零点.
         self.reference = self.target = self.target_mm = None
         self.position = self.velocity = self.word = self.inputs = self.error_status = 0
         self.last_error = ''
@@ -125,7 +125,7 @@ class LiftController:
         self.guard_thread.start()
 
     def _guard_loop(self):
-        """每100ms询问节点保护；主控制事务卡住时不继续伪装为正常主站。"""
+        """每100ms询问节点保护;主控制事务卡住时不继续伪装为正常主站."""
         while not self.stop_event.wait(0.1):
             if self.guard_active and time.monotonic() - self.sdo.last_io < 0.4:
                 try:
@@ -138,13 +138,13 @@ class LiftController:
         self.sdo.write(index, value, size=size, sub=sub, signed=signed)
 
     def _verified_write(self, index, value, size=2, sub=0, signed=False):
-        """配置后立即回读；不把CAN发送成功误认为驱动器已采用该配置。"""
+        """配置后立即回读;不把CAN发送成功误认为驱动器已采用该配置."""
         self._write(index, value, size, sub, signed)
         if self.sdo.read(index, sub=sub, size=size, signed=signed) != value:
             raise LiftError('Parameter readback mismatch: {:04X}:{:02X}'.format(index, sub))
 
     def _wait_word(self, predicate, timeout=0.45):
-        """等待状态字达到指定状态；有故障或超时就中止当前操作。"""
+        """等待状态字达到指定状态;有故障或超时就中止当前操作."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self.word = self.sdo.read(0x6041, size=2)
@@ -156,7 +156,7 @@ class LiftController:
         raise LiftError('Drive status/setpoint acknowledgement timed out.')
 
     def _check_interlock(self):
-        """调用底盘停车检查器；非空字符串是当前不允许升降的原因。"""
+        """调用底盘停车检查器;非空字符串是当前不允许升降的原因."""
         reason = self.interlock()
         if reason:
             raise LiftError(reason)
@@ -179,7 +179,7 @@ class LiftController:
         return rpm
 
     def _refresh_position_speed(self):
-        """控制字3F的bit5保持1，6081在线修改立即生效，不重发位置目标。"""
+        """控制字3F的bit5保持1,6081在线修改立即生效,不重发位置目标."""
         if self.position_halting or self.target is None:
             return
         delta = (self.target - self.position) * self.cfg.direction
@@ -188,10 +188,10 @@ class LiftController:
         rpm = self._profile_rpm(self.position_rpm, delta)
         if rpm < self.position_rpm:
             self._write(0x6081, self.cfg.velocity_raw(rpm), size=4)
-            self.position_rpm = rpm  # 同一任务只降不升，底盘停下不会突然加速。
+            self.position_rpm = rpm  # 同一任务只降不升,底盘停下不会突然加速.
 
     def apply_speed_limits(self):
-        """底盘回调立刻请求降速，不能代替底盘侧的运动许可互锁。"""
+        """底盘回调立刻请求降速,不能代替底盘侧的运动许可互锁."""
         with self.lock:
             if not self.armed:
                 return
@@ -202,13 +202,13 @@ class LiftController:
                 self._refresh_position_speed()
 
     def _height(self, counts):
-        """原始计数 -> 相对会话零点的毫米高度；未建零点时返回None。"""
+        """原始计数 -> 相对会话零点的毫米高度;未建零点时返回None."""
         if self.reference is None or self.cfg.counts <= 0 or self.cfg.mm_rev <= 0:
             return None
         return (counts - self.reference) * self.cfg.mm_rev / self.cfg.counts * self.cfg.direction
 
     def _limits(self):
-        """60FD的bit0/bit1是负/正限位，按电机方向换成物理下/上限位。"""
+        """60FD的bit0/bit1是负/正限位,按电机方向换成物理下/上限位."""
         negative, positive = bool(self.inputs & 1), bool(self.inputs & 2)
         return (negative, positive) if self.cfg.direction == 1 else (positive, negative)
 
@@ -216,7 +216,7 @@ class LiftController:
         return max(1, round(self.cfg.tolerance * self.cfg.counts / self.cfg.mm_rev))
 
     def poll(self):
-        """主循环定期读取反馈，同时检查重启、故障、停车条件和定位完成。"""
+        """主循环定期读取反馈,同时检查重启,故障,停车条件和定位完成."""
         with self.lock:
             self.word = self.sdo.read(0x6041, size=2)
             self.position = self.sdo.read(0x6063, signed=True)
@@ -244,7 +244,7 @@ class LiftController:
                 self.frame_confirmed = False
                 raise LiftError('Drive reboot detected; restart and establish reference again.')
             if self.stopping and self.cfg.counts > 0:
-                # 停机写入有回执后仍需等反馈；速度阈值约为电机1rpm。
+                # 停机写入有回执后仍需等反馈;速度阈值约为电机1rpm.
                 if not self.word & 4 and abs(self.velocity) <= self.cfg.velocity_raw(1):
                     self.stopping = False
             if self.word & 8 or self.error_status or self.error_status2 or self.sdo.emcy:
@@ -276,11 +276,17 @@ class LiftController:
                     raise LiftError('Keyboard operation lost profile velocity mode.')
                 self._keyboard_poll()
             elif self.position_halting:
+                if self.armed and self.control_mode == 1 and \
+                        self.sdo.read(0x6061, size=1, signed=True) != 1:
+                    raise LiftError('Position halt lost profile position mode.')
                 if abs(self.velocity) <= self.cfg.velocity_raw(1):
                     self.position_halting = self.busy = False
                 elif time.monotonic() - self.halt_started > 2:
                     raise LiftError('Position halt did not reach standstill within 2 seconds.')
             elif self.busy:
+                if self.armed and self.control_mode == 1 and \
+                        self.sdo.read(0x6061, size=1, signed=True) != 1:
+                    raise LiftError('Position operation lost profile position mode.')
                 self._refresh_position_speed()
                 delta_up = (self.target - self.position) * self.cfg.direction
                 lower, upper = self._limits()
@@ -292,7 +298,7 @@ class LiftController:
                     raise LiftError('Feedback crossed software travel boundary.')
                 if time.monotonic() - self.move_started > self.cfg.timeout:
                     raise LiftError('Motion timeout; no automatic retry.')
-                # 到位需同时满足驱动器bit10、位置误差和低速反馈。
+                # 到位需同时满足驱动器bit10,位置误差和低速反馈.
                 if (self.word & 0x400 and abs(self.target - self.position) <= self._tolerance_counts()
                         and abs(self.velocity) <= self.cfg.velocity_raw(1)):
                     self.busy = False
@@ -302,7 +308,7 @@ class LiftController:
             return self.status()
 
     def enable(self, keyboard=False):
-        """显式使能：检查条件 -> 关断旧指令 -> 配置 -> 6/7/F状态握手。"""
+        """显式使能:检查条件 -> 关断旧指令 -> 配置 -> 6/7/F状态握手."""
         with self.lock:
             self.cfg.validate_motion(require_travel=not keyboard)
             if keyboard and (not self.cfg.keyboard_enabled or not self.keyboard_confirmed):
@@ -317,22 +323,22 @@ class LiftController:
             self.poll()
             if self.budget.remaining <= 0:
                 raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
-            # 先进入运行就绪，避免接管其他软件遗留的运动模式或目标。
+            # 先进入运行就绪,避免接管其他软件遗留的运动模式或目标.
             self._write(0x6040, 0x0006)
             self._wait_word(lambda w: w & 0x6F == 0x21)
             self.control_mode = 3 if keyboard else 1
             self._verified_write(0x60FF, 0, size=4, signed=True)
             self._verified_write(0x6060, self.control_mode, size=1, signed=True)
-            # 停止策略：快停用6085减速度；禁用/关机采用曲线停止。
+            # 停止策略:快停用6085减速度;禁用/关机采用曲线停止.
             self._verified_write(0x605A, 2, signed=True)
             self._verified_write(0x605B, 1, signed=True)
             self._verified_write(0x605C, 1, signed=True)
-            self._verified_write(0x605D, 2, signed=True)  # bit8暂停：按6085减速，保留使能。
+            self._verified_write(0x605D, 2, signed=True)  # bit8暂停:按6085减速,保留使能.
             self._verified_write(0x605E, 2, signed=True)
             self._verified_write(0x6083, self.cfg.acceleration_raw(self.cfg.accel), size=4)
             self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
             self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
-            # 节点保护与heartbeat互斥；200ms*3是驱动器侧监督超时设置。
+            # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
             self._verified_write(0x1017, 0)
             self._verified_write(0x100C, 200)
             self._verified_write(0x100D, 3, size=1)
@@ -345,7 +351,7 @@ class LiftController:
             self.sdo.nmt(0x01)
             self.sdo.guard()
             self._wait_word(lambda w: self.sdo.guard_time is not None)
-            # 用当前反馈初始化目标，再使能；此处不触发bit4位置运动。
+            # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
             self._write(0x607A, self.position, size=4, signed=True)
             self._write(0x6040, 0x0007)
             self._wait_word(lambda w: w & 0x6F == 0x23)
@@ -365,7 +371,7 @@ class LiftController:
             self.halt_started = None
 
     def reference_here(self):
-        """在静止下限位处记录0mm；不移动机构、不清编码器、不写原点参数。"""
+        """在静止下限位处记录0mm;不移动机构,不清编码器,不写原点参数."""
         with self.lock:
             self.cfg.validate_motion()
             self._check_interlock()
@@ -375,8 +381,75 @@ class LiftController:
             self._record_checked_reference()
             self.target_mm = None
 
+    def recover_to_lower_limit(self, rpm=50, timeout_s=10):
+        """独立恢复建参考流程:位置高于下端参考但下限位未触发时,慢速下行至触发下限位.
+
+        仅在未使能/空闲/无故障/已配置速度区时下允许调用;不撤销实物门禁.
+        完成后机构静止在下限位,需要显式调reference_here才会建立会话参考.
+        不屏蔽硬限位、不扩大普通行程、不修改参考计数.
+        """
+        with self.lock:
+            self.cfg.validate_motion(require_travel=False)
+            if self.armed or self.busy or self.stopping or self.latched:
+                raise LiftError('Recovery requires a disabled, idle, non-faulted axis.')
+            if not self.cfg.zones:
+                raise LiftError('Recovery requires configured raw zones.')
+            if not 1 <= rpm <= 100:
+                raise LiftError('Recovery speed must be within 1..100 rpm.')
+            self.poll()
+            lower, upper = self._limits()
+            if lower:
+                raise LiftError('Lower limit already active; call reference_here directly.')
+            if upper:
+                raise LiftError('Upper limit active; manual inspection required.')
+            tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
+            if self.position <= self.cfg.zones.lower + tolerance:
+                raise LiftError('Position already at/below lower reference; check wiring/sensor.')
+            # 速度模式慢速下行,触发下限位后立即停车并撤使能.
+            self._write(0x6040, 0x0006)
+            self._wait_word(lambda w: w & 0x6F == 0x21)
+            self._verified_write(0x6060, 3, size=1, signed=True)
+            self._verified_write(0x60FF, 0, size=4, signed=True)
+            self._write(0x6040, 0x0007)
+            self._wait_word(lambda w: w & 0x6F == 0x23)
+            self._write(0x6040, 0x000F)
+            self._wait_word(lambda w: w & 0x6F == 0x27)
+            if self.sdo.read(0x6061, size=1, signed=True) != 3:
+                raise LiftError('Recovery failed to enter profile velocity mode.')
+            down_raw = self.cfg.velocity_raw(rpm)
+            signed_down = -down_raw if self.cfg.direction == 1 else down_raw
+            try:
+                self._write(0x60FF, signed_down, size=4, signed=True)
+                deadline = time.monotonic() + timeout_s
+                triggered = False
+                while time.monotonic() < deadline:
+                    self.inputs = self.sdo.read(0x60FD)
+                    lower, _ = self._limits()
+                    if lower:
+                        triggered = True
+                        break
+                    time.sleep(0.02)
+                self._write(0x60FF, 0, size=4, signed=True)
+                if not triggered:
+                    raise LiftError('Lower limit not reached within recovery timeout.')
+                # 真实反馈停稳再退出.
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    self.velocity = self.sdo.read(0x606C, signed=True)
+                    if abs(self.velocity) <= self.cfg.velocity_raw(1):
+                        break
+                    time.sleep(0.02)
+                else:
+                    raise LiftError('Recovery stop did not reach standstill within 2 seconds.')
+            finally:
+                self._write(0x6040, 0x0007)
+                self._wait_word(lambda w: w & 0x6F == 0x23)
+                self._write(0x6040, 0x0006)
+                self._wait_word(lambda w: w & 0x6F == 0x21)
+            self.poll()
+
     def _record_checked_reference(self):
-        """位置/键盘共用核验，不能把新零点套入旧的绝对计数速度区。"""
+        """位置/键盘共用核验,不能把新零点套入旧的绝对计数速度区."""
         self.reference = None
         self.frame_confirmed = self.keyboard_confirmed = False
         lower, upper = self._limits()
@@ -394,7 +467,7 @@ class LiftController:
         self.frame_confirmed = True
 
     def move(self, value_mm, speed_mm_s, jog=False):
-        """开始有限位置运动；jog为相对毫米步长，否则为从零点算起的高度。"""
+        """开始有限位置运动;jog为相对毫米步长,否则为从零点算起的高度."""
         with self.lock:
             self.cfg.validate_motion()
             if self.cfg.zones and not self.frame_confirmed:
@@ -409,13 +482,13 @@ class LiftController:
             if not 0 < speed <= self.cfg.max_speed:
                 raise LiftError('Speed outside configured range.')
             if jog:
-                # 未记录零点也可做受限调试点动，此时只能依赖已验证的硬件限位。
+                # 未记录零点也可做受限调试点动,此时只能依赖已验证的硬件限位.
                 if not 0 < abs(value) <= self.cfg.jog_max:
                     raise LiftError('Jog exceeds max_jog_mm or is zero.')
                 delta_mm = value
                 target = self.position + round(value * self.cfg.counts / self.cfg.mm_rev) * self.cfg.direction
             else:
-                # 绝对高度必须有有效会话零点，换算结果仍是电机原始inc。
+                # 绝对高度必须有有效会话零点,换算结果仍是电机原始inc.
                 if self.reference is None:
                     raise LiftError('No lower reference. Call reference_here at lower limit first.')
                 if not 0 <= value <= self.cfg.travel:
@@ -439,16 +512,16 @@ class LiftController:
             lower, upper = self._limits()
             if (delta_mm < 0 and lower) or (delta_mm > 0 and upper):
                 raise LiftError('Requested direction blocked by active limit.')
-            rpm = speed * 60 / self.cfg.mm_rev  # mm/s -> 电机rpm。
+            rpm = speed * 60 / self.cfg.mm_rev  # mm/s -> 电机rpm.
             if rpm > self.cfg.max_rpm:
                 raise LiftError('Requested speed exceeds max_motor_rpm.')
             rpm = self._profile_rpm(rpm, delta_mm)
             effective_speed = rpm * self.cfg.mm_rev / 60
             if abs(delta_mm) / effective_speed + 2 > min(self.cfg.timeout, self.budget.remaining):
                 raise LiftError('Move exceeds timeout; use smaller steps or verify timeout.')
-            # 绝对定位握手：先2F清激活位并等bit12清零，再写速度/目标，
-            # 最后3F产生bit4上升沿，等bit12确认接收。此回执不是到位信号。
-            # 暂停后保持bit8清bit4、装入新目标，最后3F才解除暂停，不能恢复旧任务。
+            # 绝对定位握手:先2F清激活位并等bit12清零,再写速度/目标,
+            # 最后3F产生bit4上升沿,等bit12确认接收.此回执不是到位信号.
+            # 暂停后保持bit8清bit4,装入新目标,最后3F才解除暂停,不能恢复旧任务.
             self._write(0x6040, 0x012F if self.position_halted else 0x002F)
             self._wait_word(lambda w: not w & 0x1000)
             self._write(0x6081, self.cfg.velocity_raw(rpm), size=4)
@@ -467,7 +540,7 @@ class LiftController:
             self.position_halted = False
 
     def move_top_height(self, height_m):
-        """目标是顶端总高度(米)，不是本次增量，也不是直接编码器坐标。"""
+        """目标是顶端总高度(米),不是本次增量,也不是直接编码器坐标."""
         with self.lock:
             if self.cfg.initial_top_height is None:
                 raise LiftError('Measure and fill initial_top_height_m before requesting top height.')
@@ -484,9 +557,9 @@ class LiftController:
             self.move(extension_mm, self.cfg.max_rpm * self.cfg.mm_rev / 60)
 
     def confirm_keyboard_coordinates(self):
-        """人工确认本会话计数框架：必须静止在真实下限位且读数匹配。
+        """人工确认本会话计数框架:必须静止在真实下限位且读数匹配.
 
-        不清零、不回原、不写2010/607D，也不把固定计数当作掉电有效参考。
+        不清零,不回原,不写2010/607D,也不把固定计数当作掉电有效参考.
         """
         with self.lock:
             if not self.cfg.zones:
@@ -499,7 +572,7 @@ class LiftController:
             self.keyboard_confirmed = True
 
     def operator_halt(self):
-        """跨模式普通停车；位置模式用bit8暂停，不取消使能，也不恢复旧任务。"""
+        """跨模式普通停车;位置模式用bit8暂停,不取消使能,也不恢复旧任务."""
         with self.lock:
             if self.armed and self.control_mode == 1:
                 if not self.position_halted:
@@ -508,7 +581,7 @@ class LiftController:
                     self.position_halting = self.position_halted = True
                     self.target = self.target_mm = None
                     self.position_rpm = 0
-                    self.busy = True  # 下一次真实反馈确认停稳前保持busy。
+                    self.busy = True  # 下一次真实反馈确认停稳前保持busy.
                 self.last_error = 'Position halt requested; confirm standstill in feedback.'
             else:
                 self.keyboard_halt()
@@ -522,9 +595,9 @@ class LiftController:
             self.command_rpm = rpm
 
     def keyboard_halt(self, reason='Keyboard stop', require_neutral=True):
-        """正常松键/端点停止：带减速度写速度0，保留使能保持力。
+        """正常松键/端点停止:带减速度写速度0,保留使能保持力.
 
-        与全局stop的故障锁存不同；不取消使能、不自动复位故障。
+        与全局stop的故障锁存不同;不取消使能,不自动复位故障.
         """
         with self.lock:
             if self.armed and self.control_mode == 3:
@@ -539,7 +612,7 @@ class LiftController:
                 self.last_error = reason
 
     def keyboard_command(self, direction):
-        """方向心跳(-1/0/+1)，无队列、无自动使能、换向先停稳并松键。"""
+        """方向心跳(-1/0/+1),无队列,无自动使能,换向先停稳并松键."""
         with self.lock:
             if isinstance(direction, bool) or direction not in (-1, 0, 1):
                 raise LiftError('Keyboard direction must be -1, 0 or +1.')
@@ -556,7 +629,7 @@ class LiftController:
                 raise LiftError('Explicitly enable keyboard mode first.')
             self.poll()
             if self.neutral_required:
-                return  # 长按到限位后不会因为传感器抖动而恢复运动。
+                return  # 长按到限位后不会因为传感器抖动而恢复运动.
             if self.key_direction and direction != self.key_direction:
                 self.keyboard_halt('Release arrows and stop before reversing.')
                 return
@@ -594,7 +667,7 @@ class LiftController:
         self.busy = self.command_rpm != 0 or abs(self.velocity) > self.cfg.velocity_raw(1)
 
     def stop(self, reason='Operator stop'):
-        """锁住后续运动并下发000B；返回True只表示停机写入得到SDO回执。"""
+        """锁住后续运动并下发000B;返回True只表示停机写入得到SDO回执."""
         with self.lock:
             was_writing = self.armed or self.guard_active or self.busy
             self.stopping = self.stopping or was_writing
@@ -620,7 +693,7 @@ class LiftController:
             return confirmed
 
     def disable(self):
-        """确认定位结束/停稳后取消使能；取消后电机可能失去保持力。"""
+        """确认定位结束/停稳后取消使能;取消后电机可能失去保持力."""
         with self.lock:
             self.poll()
             if self.busy or self.stopping:
@@ -631,7 +704,7 @@ class LiftController:
             self.armed = False
 
     def reset(self):
-        """人工故障复位；保持不使能，撤销旧参考，不恢复被中断的目标。"""
+        """人工故障复位;保持不使能,撤销旧参考,不恢复被中断的目标."""
         with self.lock:
             self.cfg.validate_motion(require_travel=False)
             self._check_interlock()
@@ -655,7 +728,7 @@ class LiftController:
             self.poll()
 
     def status(self):
-        """供ROS发布的快照；busy也包含尚未确认停稳的stopping阶段。"""
+        """供ROS发布的快照;busy也包含尚未确认停稳的stopping阶段."""
         lower, upper = self._limits()
         height_mm = self._height(self.position)
         initial = self.cfg.initial_top_height
@@ -682,7 +755,7 @@ class LiftController:
                     cooldown_remaining_s=self.budget.cooldown_remaining(time.monotonic()))
 
     def fail(self, reason):
-        """异常统一入口：撤销零点、记录原因，并尽力请求停机。"""
+        """异常统一入口:撤销零点,记录原因,并尽力请求停机."""
         self.connected = False
         self.reference = None
         self.keyboard_confirmed = False
@@ -690,7 +763,7 @@ class LiftController:
         return self.stop(reason)
 
     def close(self):
-        """退出时请求停止、结束节点保护线程并关闭适配器，不自动再次连接。"""
+        """退出时请求停止,结束节点保护线程并关闭适配器,不自动再次连接."""
         self.stop('Node shutdown')
         self.guard_active = False
         self.stop_event.set()

@@ -24,10 +24,10 @@ class SdoAbort(CanError):
 
 
 class SocketCan:
-    """通用SocketCAN接口，不绑定Kvaser、candleLight等品牌/固件。
+    """通用SocketCAN接口,不绑定Kvaser,candleLight等品牌/固件.
 
-    先在Linux生成并配置can0等接口；Windows或厂商CANlib API不能替代此接口。
-    驱动问题先运行scripts/diagnose_can.py，不由运动程序自动加载驱动或改网卡。
+    先在Linux生成并配置can0等接口;Windows或厂商CANlib API不能替代此接口.
+    驱动问题先运行scripts/diagnose_can.py,不由运动程序自动加载驱动或改网卡.
     """
     def __init__(self, interface):
         if not hasattr(socket, 'AF_CAN'):

@@ -38,7 +38,7 @@ namespace lslidar_driver {
     static uint16_t MSOP_DATA_PORT_NUMBER = 2368;   // lslidar default data port on PC
     static uint16_t DIFOP_DATA_PORT_NUMBER = 2369;  // lslidar default difop data port on PC
 /**
- *  从在线的网络数据或离线的网络抓包数据（pcap文件）中提取出lidar的原始数据，即packet数据包
+ *  从在线的网络数据或离线的网络抓包数据(pcap文件)中提取出lidar的原始数据,即packet数据包
  * @brief The Input class,
      *
      * @param private_nh  一个NodeHandled,用于通过节点传递参数

@@ -1,4 +1,4 @@
-"""ROS适配层桩测试：验证接口连接，不代表真实ROS/catkin测试通过。"""
+"""ROS适配层桩测试:验证接口连接,不代表真实ROS/catkin测试通过."""
 import importlib.util
 import json
 import pathlib
@@ -81,6 +81,7 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIn('~enable_keyboard', names)
         self.assertIn('~confirm_keyboard_coordinates', names)
         self.assertIn('~keyboard_stop', names)
+        self.assertIn('~recover_to_lower_limit', names)
         topics = [call.args[0] for call in self.ros.Subscriber.call_args_list]
         self.assertIn('~keyboard_command', topics)
 

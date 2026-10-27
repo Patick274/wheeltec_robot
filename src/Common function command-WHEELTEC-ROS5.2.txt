@@ -36,7 +36,7 @@ roslaunch xf_mic_asr_offline mic_init.launch
 9.KCF tracking (sensor: camera)
 roslaunch kcf_track kcf_tracker.launch
 
-10.RRT mapping（For details, see the tutorial）(sensor: radar)
+10.RRT mapping(For details, see the tutorial)(sensor: radar)
 //launch rrt_slam.launch file:
 roslaunch turn_on_wheeltec_robot rrt_slam.launch
 //run RVIZ, click "Add" → "By Topic" at the bottom left to add these configuration plugins:
@@ -73,14 +73,14 @@ roslaunch wheeltec_multi wheeltec_slave.launch
 roslaunch wheeltec_multi robot_tf.launch
 
 13.display the camera image through the Web browser(sensor: camera)
-The host：roslaunch usb_cam usb_cam-test.launch
+The host:roslaunch usb_cam usb_cam-test.launch
                   rosrun web_video_server web_video_server
-Host Web view：http://localhost:8080/(The hotspot is emitted by the host)
-Client Web View：http://192.168.0.100:8080 (The client is connected to the hot spot)
+Host Web view:http://localhost:8080/(The hotspot is emitted by the host)
+Client Web View:http://192.168.0.100:8080 (The client is connected to the hot spot)
 
 14.Object recognition (no support for Raspberry Pi 4B 2GB)(sensor: camera)
-Object recognition：roslaunch ros_detection ros_tensorflow_classify.launch
-View the camera  image in real time：rqt_image_view (topic: /camera/rgb/image_raw/compressed)
+Object recognition:roslaunch ros_detection ros_tensorflow_classify.launch
+View the camera  image in real time:rqt_image_view (topic: /camera/rgb/image_raw/compressed)
 
 15.AR tag recognition (sensor: camera)
 roslaunch turn_on_wheeltec_robot ar_label.launch
@@ -108,7 +108,7 @@ roslaunch wheeltec_gazebo_function mapping.launch
 //keyboard control
 roslaunch wheeltec_gazebo_function keyboard_teleop.launch
 //map saving
-(WHEELTEC.pgm、WHEELTEC.yaml)
+(WHEELTEC.pgm,WHEELTEC.yaml)
 roslaunch wheeltec_gazebo_function map_saver.launch
 //2D gazebo navigation
 roslaunch wheeltec_gazebo_function navigation.launch
@@ -126,7 +126,7 @@ catkin_make -DCATKIN_WHITELIST_PACKAGES="package name"
 Uncompile the specified feature pack:
 catkin_make -DCATKIN_WHITELIST_PACKAGES=""
 
-SSH login：
+SSH login:
 ssh -Y wheeltec@192.168.0.100
 
 NFS mount:
@@ -134,28 +134,28 @@ sudo mount -t nfs 192.168.0.100:/home/wheeltec/wheeltec_robot /mnt
 NFS unmount:
 sudo umount -t nfs 192.168.0.100:/home/wheeltec/wheeltec_robot /mnt
 
-Enter the map path：
+Enter the map path:
 cd /home/wheeltec/wheeltec_robot/src/turn_on_wheeltec_robot/map
-Save the map manually：
+Save the map manually:
 rosrun map_server map_saver -f 20200714
 
-Turn on the RGB camera：
+Turn on the RGB camera:
 roslaunch usb_cam usb_cam-test.launch
 rqt_image_view
 
-Turn on both the depth camera and the RGB camera：
+Turn on both the depth camera and the RGB camera:
 roslaunch astra_camera astra.launch 
 rqt_image_view
 
-View node and topic relationships：
+View node and topic relationships:
 rqt_graph
 
-Generate TF tree PDF：
+Generate TF tree PDF:
 rosrun tf view_frames
-Check the TF tree：
+Check the TF tree:
 rosrun rqt_tf_tree rqt_tf_tree
 
-VNC adjusts the resolution：
+VNC adjusts the resolution:
 xrandr --fb 1024x768
 
 rosrun tf view_frames

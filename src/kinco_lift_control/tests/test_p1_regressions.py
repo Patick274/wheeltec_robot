@@ -1,4 +1,4 @@
-"""前三项审查问题的回归；仅使用内存CAN及ROS桩，不连接硬件。"""
+"""前三项审查问题的回归;仅使用内存CAN及ROS桩,不连接硬件."""
 import pathlib
 import sys
 import types
@@ -135,6 +135,58 @@ class ControllerP1Tests(unittest.TestCase):
         with self.assertRaisesRegex(LiftError, 'jump'):
             self.axis.poll()
         self.assertFalse(self.axis.frame_confirmed)
+
+    def test_position_mode_detects_6061_mode_change(self):
+        """位置模式运行中驱动器6061被外部改动必须撤销任务并报错;键盘模式已有此保护."""
+        self.start_position()
+        self.axis.move_top_height(1.1)
+        self.assertTrue(self.axis.busy)
+        original = self.axis.sdo.read
+        def read(index, *args, **kwargs):
+            return 7 if index == 0x6061 else original(index, *args, **kwargs)
+        with patch.object(self.axis.sdo, 'read', side_effect=read):
+            with self.assertRaisesRegex(LiftError, 'mode'):
+                self.axis.poll()
+
+    def test_position_mode_6061_still_checked_during_halt(self):
+        """位置暂停期间6061被改也要检测;不能只核验运动中的轮询."""
+        self.start_position()
+        self.axis.move_top_height(1.1)
+        self.axis.operator_halt()
+        original = self.axis.sdo.read
+        def read(index, *args, **kwargs):
+            return 7 if index == 0x6061 else original(index, *args, **kwargs)
+        with patch.object(self.axis.sdo, 'read', side_effect=read):
+            with self.assertRaisesRegex(LiftError, 'mode'):
+                self.axis.poll()
+
+    def test_lower_inset_recovery_deadlock(self):
+        """正常内缩5mm停车后重启,下限位未触发;reference_here失败,jog向下被inset拦截,
+        形成死结.需要独立的受控恢复流程,不能屏蔽硬限位或扩大普通行程."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        lower, _ = self.axis._limits()
+        self.assertFalse(lower)
+        with self.assertRaisesRegex(LiftError, 'lower limit'):
+            self.axis.reference_here()
+        self.axis.enable()
+        with self.assertRaisesRegex(LiftError, 'inset|frame'):
+            self.axis.move(-1, 1, jog=True)
+        self.axis.disable()
+
+    def test_recover_to_lower_limit_enables_reference(self):
+        """恢复流程应慢速下行至下限位触发,停稳后可正常建立参考."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.recover_to_lower_limit()
+        lower, _ = self.axis._limits()
+        self.assertTrue(lower)
+        self.assertFalse(self.bus.moving)
+        self.axis.reference_here()
+        self.assertTrue(self.axis.frame_confirmed)
+        self.assertIsNotNone(self.axis.reference)
 
 
 class NodeP1Tests(unittest.TestCase):

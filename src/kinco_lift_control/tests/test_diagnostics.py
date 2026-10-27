@@ -1,4 +1,4 @@
-"""诊断逻辑测试：不接USB/CAN，不修改网络配置。"""
+"""诊断逻辑测试:不接USB/CAN,不修改网络配置."""
 import pathlib
 import sys
 import unittest

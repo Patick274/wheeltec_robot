@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*  
-# 动作通信：该例程在room_square仿真环境下，执行/action_client通信，消息类型move_base_msgs/MoveBaseAction MoveBaseGoal
+# 动作通信:该例程在room_square仿真环境下,执行/action_client通信,消息类型move_base_msgs/MoveBaseAction MoveBaseGoal
 
 import roslib
 import rospy  
@@ -17,7 +17,7 @@ class RunSquare():
         rospy.init_node('run_square', anonymous=False)  
         rospy.on_shutdown(self.shutdown)  
         
-        # 1、订阅move_base服务器消息 + 发布速度话题  
+        # 1,订阅move_base服务器消息 + 发布速度话题  
         self.cmd_vel_pub = rospy.Publisher('cmd_vel', Twist,  queue_size=10)
         self.move_base = actionlib.SimpleActionClient("move_base",MoveBaseAction)
         
@@ -27,12 +27,12 @@ class RunSquare():
         rospy.loginfo("Starting navigation test")  
             
 
-        # 2、目标点内容
+        # 2,目标点内容
         
-        # 创建四元数列表，保存目标的角度数据  
+        # 创建四元数列表,保存目标的角度数据  
         quaternions = list()  
  
-        # 定义四个顶角处机器人的方向角度（Euler angles:http://zh.wikipedia.org/wiki/%E6%AC%A7%E6%8B%89%E8%A7%92)  
+        # 定义四个顶角处机器人的方向角度(Euler angles:http://zh.wikipedia.org/wiki/%E6%AC%A7%E6%8B%89%E8%A7%92)  
         euler_angles = (pi/2, pi, 3*pi/2, 0)  
           
         # 将上面的Euler angles转换成Quaternion的格式  
@@ -41,7 +41,7 @@ class RunSquare():
             q = Quaternion(*q_angle)  
             quaternions.append(q)  
 
-        # 创建四个导航点的位置（角度和坐标位置）  
+        # 创建四个导航点的位置(角度和坐标位置)  
         waypoints = list()  
         waypoints.append(Pose(Point(1.1, 0.0, 0.0), quaternions[0]))  
         waypoints.append(Pose(Point(1.1, 0.5, 0.0), quaternions[1]))  
@@ -63,11 +63,11 @@ class RunSquare():
 
     def send_goal(self, goal):  
 
-            # 3、将目标点发送出去 
+            # 3,将目标点发送出去 
             rospy.loginfo("Sending goal")  
             self.move_base.send_goal(goal)  
               
-            # 4、五分钟时间限制 查看是否成功到达  
+            # 4,五分钟时间限制 查看是否成功到达  
             finished_within_time = self.move_base.wait_for_result(rospy.Duration(300))   
             if not finished_within_time:  
                 self.move_base.cancel_goal()  
@@ -77,7 +77,7 @@ class RunSquare():
                 if state == GoalStatus.SUCCEEDED:  
                     rospy.loginfo("Goal succeeded!")  
                 else:  
-                    rospy.loginfo("Goal failed！ ")  
+                    rospy.loginfo("Goal failed! ")  
                    
   
     def shutdown(self):  

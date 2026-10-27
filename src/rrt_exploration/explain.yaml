@@ -3,74 +3,74 @@
 # ============================================================
 
 # 包名: rrt_exploration
-# 来源: hasauino/rrt_exploration（作者硕士论文项目，IEEE 论文 8202319）
-# 依赖: gmapping、navigation(move_base)、OpenCV、Numpy、Sklearn（Python2）
+# 来源: hasauino/rrt_exploration(作者硕士论文项目,IEEE 论文 8202319)
+# 依赖: gmapping,navigation(move_base),OpenCV,Numpy,Sklearn(Python2)
 
 # ---------- 这个包是干什么的 ----------
-# 作用: 基于 RRT（快速随机扩展树）的【自主探索建图】算法包。
-#   机器人在未知环境中自动找"边界点"(frontier：已探索区域与未知区域的交界)，
-#   把边界点作为导航目标发给 move_base，边探索边用 gmapping 建图，
-#   直到整个环境被探索完。支持单机/多机器人协同探索。
+# 作用: 基于 RRT(快速随机扩展树)的[自主探索建图]算法包.
+#   机器人在未知环境中自动找"边界点"(frontier:已探索区域与未知区域的交界),
+#   把边界点作为导航目标发给 move_base,边探索边用 gmapping 建图,
+#   直到整个环境被探索完.支持单机/多机器人协同探索.
 
-# ---------- 整体流程（5 个节点协作）----------
+# ---------- 整体流程(5 个节点协作)----------
 # 流程:
-#   1. global_rrt_detector (C++): 在整张地图上长 RRT，检测远处边界点
-#      需要在 RViz 用 Publish Point 点 5 个点（4 个圈出探索区域 + 1 个树起点）
-#   2. local_rrt_detector  (C++): 以机器人当前位置为起点反复重建小 RRT，
+#   1. global_rrt_detector (C++): 在整张地图上长 RRT,检测远处边界点
+#      需要在 RViz 用 Publish Point 点 5 个点(4 个圈出探索区域 + 1 个树起点)
+#   2. local_rrt_detector  (C++): 以机器人当前位置为起点反复重建小 RRT,
 #      快速检测机器人附近的边界点
-#   3. frontier_opencv_detector.py: 用 OpenCV 直接找边界（备用检测器，
-#      原本用于和 RRT 方案做对比，一般不用）
-#   4. filter.py: 汇总所有检测器发来的点，删掉旧的/无效的/重复的点，
+#   3. frontier_opencv_detector.py: 用 OpenCV 直接找边界(备用检测器,
+#      原本用于和 RRT 方案做对比,一般不用)
+#   4. filter.py: 汇总所有检测器发来的点,删掉旧的/无效的/重复的点,
 #      聚类后发布到 /filtered_points
-#   5. assigner.py: 按"信息增益 - 距离代价 + 迟滞"打分选点，
+#   5. assigner.py: 按"信息增益 - 距离代价 + 迟滞"打分选点,
 #      通过 actionlib 把目标点发给 move_base 执行导航
 
 # ---------- 话题流向 ----------
 # 话题流向:
 #   /map(gmapping) → global/local detector → /detected_points
 #     → filter.py → /filtered_points → assigner.py → move_base(actionlib)
-#   RViz 可视化话题: ~shapes(RRT 树)、frontiers、centroids
+#   RViz 可视化话题: ~shapes(RRT 树),frontiers,centroids
 
 # ---------- 目录结构 ----------
 # 目录说明:
-#   src/global_rrt_detector.cpp:  全局边界检测器（C++）
-#   src/local_rrt_detector.cpp:   局部边界检测器（C++）
+#   src/global_rrt_detector.cpp:  全局边界检测器(C++)
+#   src/local_rrt_detector.cpp:   局部边界检测器(C++)
 #   src/functions.cpp / include/functions.h: 两个检测器共用的 RRT/栅格函数
 #   src/mtrand.cpp / include/mtrand.h:       梅森旋转随机数发生器
 #   src/wait_for_fin.cpp:          辅助节点
-#   scripts/filter.py:    ★ 边界点过滤+聚类节点（python2）
-#   scripts/assigner.py:  ★ 目标点分配节点，发 goal 给 move_base（python2）
-#   scripts/frontier_opencv_detector.py: OpenCV 边界检测器（一般不用）
-#   scripts/getfrontier.py / functions.py: 被上面脚本 import 的库，不单独运行
-#   msg/PointArray.msg:   自定义消息，filter → assigner 传点数组用
-#   launch/simple.launch:   单机版启动（检测器 + assigner，无 filter）
-#   launch/single.launch:   ★ 常用：单机完整版（4 个节点全开）
+#   scripts/filter.py:    ★ 边界点过滤+聚类节点(python2)
+#   scripts/assigner.py:  ★ 目标点分配节点,发 goal 给 move_base(python2)
+#   scripts/frontier_opencv_detector.py: OpenCV 边界检测器(一般不用)
+#   scripts/getfrontier.py / functions.py: 被上面脚本 import 的库,不单独运行
+#   msg/PointArray.msg:   自定义消息,filter → assigner 传点数组用
+#   launch/simple.launch:   单机版启动(检测器 + assigner,无 filter)
+#   launch/single.launch:   ★ 常用:单机完整版(4 个节点全开)
 #   launch/three_robots.launch: 三机器人协同探索示例
 
 # ---------- 使用前提 ----------
 # 前提条件:
-#   - gmapping 已在跑（提供 /robot_1/map 话题）
-#   - move_base 导航栈已在跑（提供 global_costmap，接收目标点）
-#   - tf/话题/节点名都要带机器人名前缀 /robot_1（单机也要！）
+#   - gmapping 已在跑(提供 /robot_1/map 话题)
+#   - move_base 导航栈已在跑(提供 global_costmap,接收目标点)
+#   - tf/话题/节点名都要带机器人名前缀 /robot_1(单机也要!)
 #   - 多机时还需 multirobot_map_merge 合并地图
-# 注意: 单机使用时名字空间前缀 /robot_1 不能省，
+# 注意: 单机使用时名字空间前缀 /robot_1 不能省,
 #   filter 和 assigner 靠 namespace 参数(/robot_)+编号拼接话题名
 
 # ---------- 常用命令 ----------
 # 常用命令:
 #   启动:   roslaunch rrt_exploration single.launch
-#   发区域: RViz 里点 "Publish Point"，先点 4 个角圈区域，再点 1 个树起点
+#   发区域: RViz 里点 "Publish Point",先点 4 个角圈区域,再点 1 个树起点
 #   看边界: rostopic echo /detected_points
 
 # ---------- 常见问题 ----------
 # 常见问题:
-#   - 脚本已适配 python3（shebang 均为 python3，Noetic 可直接运行），
-#     但 filter.py 依赖 sklearn 的 MeanShift 聚类，
+#   - 脚本已适配 python3(shebang 均为 python3,Noetic 可直接运行),
+#     但 filter.py 依赖 sklearn 的 MeanShift 聚类,
 #     缺库时报错需安装: sudo apt install python3-sklearn
-#   - eta 参数控制 RRT 生长步长(米)：global 用大值(如15)，local 用小值(如1)
-#     eta 太大树长得快但会漏掉小角落，太小则检测慢
-#   - 不开始检测边界：检查是否用 RViz 的 Publish Point 发够了 5 个点
-#     （前 4 个圈出探索区域，第 5 个是 RRT 树起点）
-#   - 检测到点但机器人不动：确认 move_base 正常、代价地图没有误标障碍物
-#   - filter.py 一直删点/无输出：检查 map_topic 参数与实际地图话题是否一致
-#     （单机也必须用 /robot_1/map 这种带前缀的名字）
+#   - eta 参数控制 RRT 生长步长(米):global 用大值(如15),local 用小值(如1)
+#     eta 太大树长得快但会漏掉小角落,太小则检测慢
+#   - 不开始检测边界:检查是否用 RViz 的 Publish Point 发够了 5 个点
+#     (前 4 个圈出探索区域,第 5 个是 RRT 树起点)
+#   - 检测到点但机器人不动:确认 move_base 正常,代价地图没有误标障碍物
+#   - filter.py 一直删点/无输出:检查 map_topic 参数与实际地图话题是否一致
+#     (单机也必须用 /robot_1/map 这种带前缀的名字)

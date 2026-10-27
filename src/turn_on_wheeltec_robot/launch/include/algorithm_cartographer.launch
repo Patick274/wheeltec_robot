@@ -2,7 +2,7 @@
   <arg name="configuration_directory" default="$(find turn_on_wheeltec_robot)/configuration_files"/>
   <arg name="configuration_basename"  default="wheeltec_2d.lua"/>
 
-  <!-- cartographer 主节点:消费合并后的 /scan、/odom、/imu,发布 map->odom_combined TF -->
+  <!-- cartographer 主节点:消费合并后的 /scan,/odom,/imu,发布 map->odom_combined TF -->
   <node name="cartographer_node" pkg="cartographer_ros" type="cartographer_node" output="screen"
         args="-configuration_directory $(arg configuration_directory)
               -configuration_basename $(arg configuration_basename)">

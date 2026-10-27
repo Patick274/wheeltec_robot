@@ -9,7 +9,7 @@
 #ifndef LSM10_H
 #define LSM10_H
 #include <boost/date_time/posix_time/posix_time.hpp>  // 时间相关(用于计算转速)
-#include <boost/thread.hpp>                            // 线程、互斥锁、条件变量
+#include <boost/thread.hpp>                            // 线程,互斥锁,条件变量
 #include <string>
 #include <ros/ros.h>
 #include <sensor_msgs/LaserScan.h>                     // 标准激光点云消息
@@ -17,7 +17,7 @@
 
 namespace ls {
 
-/* 单个扫描点的结构: 角度(度)、距离(米)、强度 */
+/* 单个扫描点的结构: 角度(度),距离(米),强度 */
 typedef struct {
     double degree;
     double range;
@@ -42,7 +42,7 @@ public:
 
     /**
     * 获取雷达数据
-    * poins: 雷达点的数据。类型为ScanPoint数组
+    * poins: 雷达点的数据.类型为ScanPoint数组
     */
     int getScan(std::vector<ScanPoint> &points, ros::Time &scan_time, float &scan_duration);
 

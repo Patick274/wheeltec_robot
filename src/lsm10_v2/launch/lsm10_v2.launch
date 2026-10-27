@@ -32,7 +32,7 @@
     </node>
 
     <node if="$(arg if_double)" name="lsm10_v2_double" pkg="lsm10_v2" type="lsm10_v2_double" >
-        <param name="scan_topic" value="/scan"/>    <!--scan_double_m10设置激光数据topic名称--><!--如果要加入c16雷达，将单线雷达的topic换为scan_double_m10-->
+        <param name="scan_topic" value="/scan"/>    <!--scan_double_m10设置激光数据topic名称--><!--如果要加入c16雷达,将单线雷达的topic换为scan_double_m10-->
         <param name="frame_id"         type="string" value="laser"/>
         <param name="lidar1_rotate"    type="double"   value="180"/>           <!-- 雷达1坐标旋转角度-->
         <param name="lidar2_rotate"    type="double"   value="0"/>           <!-- 雷达2坐标旋转角度-->

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux/Jetson ROS1终端方向键，默认不使能、不设零、不复位故障。"""
+"""Linux/Jetson ROS1终端方向键,默认不使能,不设零,不复位故障."""
 import json
 import math
 import os

@@ -1,10 +1,10 @@
 <launch>
-  <!--打开节点wheeltec_robot，初始化串口等操作-->
+  <!--打开节点wheeltec_robot,初始化串口等操作-->
   <arg name="smoother"  default="false"/> <!-- 是否开启速度平滑功能 -->
   <arg name="odom_frame_id"  default="odom_combined"/>
  
   <!-- 速度仲裁器 twist_mux: 手柄(cmd_vel_teleop,高优先级)与导航(cmd_vel_nav,低优先级)
-       的指令在此仲裁后统一输出到 cmd_vel, 再由底盘节点(或速度平滑器)消费。
+       的指令在此仲裁后统一输出到 cmd_vel, 再由底盘节点(或速度平滑器)消费.
        仲裁规则见 wheeltec_joy/config/twist_mux.yaml -->
   <node pkg="twist_mux" type="twist_mux" name="twist_mux" output="screen">
     <rosparam file="$(find wheeltec_joy)/config/twist_mux.yaml" command="load"/>
@@ -13,7 +13,7 @@
   </node>
 
   <node pkg="turn_on_wheeltec_robot" type="wheeltec_robot_node" name="wheeltec_robot" output="screen" respawn="false">
-    <!-- 强制升降低速许可；lift节点缺失/故障/许可过期时发送底盘零速，不可仅更新单个包。 -->
+    <!-- 强制升降低速许可;lift节点缺失/故障/许可过期时发送底盘零速,不可仅更新单个包. -->
     <param name="lift_request_topic" type="string" value="/lift/base_motion_request"/>
     <param name="lift_permit_topic" type="string" value="/lift/base_motion_permit"/>
     <param name="usart_port_name"    type="string" value="/dev/wheeltec_controller"/>  
@@ -21,11 +21,11 @@
     <param name="odom_frame_id"      type="string" value="$(arg odom_frame_id)"/> 
     <param name="robot_frame_id"     type="string" value="base_footprint"/> 
     <param name="gyro_frame_id"      type="string" value="gyro_link"/> 
-    <!-- 如果开启了平滑功能，则订阅平滑速度 -->
+    <!-- 如果开启了平滑功能,则订阅平滑速度 -->
     <remap if="$(arg smoother)" from="cmd_vel" to="smoother_cmd_vel"/>
   </node>
 
-  <!-- 如果开启了速度平滑功能，则运行速度平滑功能包 -->
+  <!-- 如果开启了速度平滑功能,则运行速度平滑功能包 -->
   <include if="$(arg smoother)" 
     file="$(find turn_on_wheeltec_robot)/launch/include/velocity_smoother.launch" >
   </include>

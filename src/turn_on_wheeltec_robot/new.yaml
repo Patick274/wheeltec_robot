@@ -1,14 +1,14 @@
 # ============================================================
-# turn_on_wheeltec_robot 功能包 — 逐文件说明 (new.yaml)
+# turn_on_wheeltec_robot 功能包 - 逐文件说明 (new.yaml)
 # ============================================================
-# 本文件是本包所有文件的作用说明,以当前实际代码为准(车型已切换为 senior_wheeltec)。
-# 旧版说明见 explain.yaml(部分内容已过时:其中车型仍写 mini_diff,实际已改为 senior_wheeltec)。
+# 本文件是本包所有文件的作用说明,以当前实际代码为准(车型已切换为 senior_wheeltec).
+# 旧版说明见 explain.yaml(部分内容已过时:其中车型仍写 mini_diff,实际已改为 senior_wheeltec).
 
 包概览:
   名称: turn_on_wheeltec_robot
   定位: Wheeltec 整机主控包(私有闭源)
   职责:
-    - 串口驱动底盘: 下发速度指令、读取里程计/IMU/电池电压 (wheeltec_robot_node)
+    - 串口驱动底盘: 下发速度指令,读取里程计/IMU/电池电压 (wheeltec_robot_node)
     - 发布 TF 树与 URDF 模型 (robot_model_visualization.launch)
     - 一键启动建图 / 导航 / 自主探索
     - 保存建好的地图
@@ -28,7 +28,7 @@
     内容: 包名 turn_on_wheeltec_robot,依赖 roscpp serial sensor_msgs nav_msgs tf actionlib 等
   explain.yaml:
     作用: 旧版功能包说明文档(2026-08-27)
-    备注: 内容较全(含 twist_mux 仲裁、串口排查),但车型仍写 mini_diff,已过时;以本 new.yaml 为准
+    备注: 内容较全(含 twist_mux 仲裁,串口排查),但车型仍写 mini_diff,已过时;以本 new.yaml 为准
 
 # ============================================================
 # configuration_files/
@@ -36,9 +36,9 @@
 configuration_files:
   wheeltec_2d.lua:
     作用: cartographer 2D 建图配置,由 launch/include/algorithm_cartographer.launch 加载
-    内容: map_frame=map、tracking_frame=base_footprint、odom_frame=odom_combined;
+    内容: map_frame=map,tracking_frame=base_footprint,odom_frame=odom_combined;
           双 M10 已合并为单路 /scan(num_laser_scans=1);M10 量程 0.25~12m;
-          ARM 平台减负(降采样运动滤波、降低闭环频率)
+          ARM 平台减负(降采样运动滤波,降低闭环频率)
 
 # ============================================================
 # costmap_common_params/  (按车型分目录,由 car_mode 参数选择加载)
@@ -54,8 +54,8 @@ costmap_common_params:
       要点: footprint [[-0.37,-0.29],[-0.37,0.29],[0.37,0.29],[0.37,-0.29]],inflation_radius 0.4,
             障碍层观测源 scan(sensor_frame laser)
     teb_local_planner_params.yaml:
-      作用: teb 局部规划器参数(速度限制、footprint_model polygon、轨迹优化权重)
-      要点: max_vel_x 0.5、acc_lim_theta 0.3、footprint_model.vertices 同 footprint
+      作用: teb 局部规划器参数(速度限制,footprint_model polygon,轨迹优化权重)
+      要点: max_vel_x 0.5,acc_lim_theta 0.3,footprint_model.vertices 同 footprint
     costmap_common_params_pure3d.yaml:
       作用: 纯 3D 导航代价地图参数(3D 导航已删除,本文件无引用)
   param_senior_diff:       # senior_diff 车型(保留车型)
@@ -73,10 +73,10 @@ costmap_common_params:
 include:
   wheeltec_robot.h:
     作用: 底盘节点类 turn_on_robot 声明
-    内容: 串口协议宏(帧头 0x7B/帧尾 0x7D)、收发数据结构体、IMU/里程计协方差矩阵、
-          IMU 量程换算系数(GYROSCOPE_RATIO/ACCEl_RATIO)、类成员与成员函数声明
+    内容: 串口协议宏(帧头 0x7B/帧尾 0x7D),收发数据结构体,IMU/里程计协方差矩阵,
+          IMU 量程换算系数(GYROSCOPE_RATIO/ACCEl_RATIO),类成员与成员函数声明
   Quaternion_Solution.h:
-    作用: 四元数姿态解算函数声明(InvSqrt、Quaternion_Solution)
+    作用: 四元数姿态解算函数声明(InvSqrt,Quaternion_Solution)
 
 # ============================================================
 # src/   (源码)
@@ -85,7 +85,7 @@ src:
   wheeltec_robot.cpp:
     作用: ★ 底盘串口通信节点主实现
     功能: 订阅 cmd_vel → 打包成串口协议帧(速度放大 1000 倍)发给下位机 STM32;
-          读串口逐帧校验(BCC)→ 解析速度/IMU/电压 → 发布 odom、imu、PowerVoltage 话题,
+          读串口逐帧校验(BCC)→ 解析速度/IMU/电压 → 发布 odom,imu,PowerVoltage 话题,
           并对速度积分得里程计位姿
   Quaternion_Solution.cpp:
     作用: IMU 姿态解算(Mahony 互补滤波: 角速度积分 + 加速度计重力修正)
@@ -108,7 +108,7 @@ launch:
       local_planner: 局部规划器 teb(默认)/ dwa
   wheeltec_lidar.launch:
     作用: 雷达启动
-    参数: rplidar_mode 默认 ls_M10_double(双 M10),可选思岚 A1/A2/A3/S1、镭神 M10 单/双、C16、ls_multi
+    参数: rplidar_mode 默认 ls_M10_double(双 M10),可选思岚 A1/A2/A3/S1,镭神 M10 单/双,C16,ls_multi
   mapping.launch:
     作用: 建图总入口(开雷达 + 建图算法 + 底层节点)
     参数: mapping_mode 默认 gmapping,可选 hector/karto/cartographer
@@ -121,7 +121,7 @@ launch:
     作用: rrt_exploration 包的自主探索节点(global/local_rrt_detector + filter.py + assigner.py + wait_for_fin)
   robot_model_visualization.launch:
     作用: 只发布 URDF 模型与车型 TF(RViz 看车用)
-    内容: 三种车型各自的 static TF(laser/camera/gyro)、robot_description 加载、
+    内容: 三种车型各自的 static TF(laser/camera/gyro),robot_description 加载,
           joint_state_publisher + robot_state_publisher
   rviz_nav_console.launch:
     作用: RViz 多点导航控制台(启动 rviz_nav_console.py)
@@ -134,7 +134,7 @@ launch:
 launch_include:
   base_serial.launch:
     作用: 底盘节点 + twist_mux 速度仲裁
-    内容: twist_mux 节点(手柄 cmd_vel_teleop 高优先级、导航 cmd_vel_nav 低优先级→cmd_vel)
+    内容: twist_mux 节点(手柄 cmd_vel_teleop 高优先级,导航 cmd_vel_nav 低优先级→cmd_vel)
           + wheeltec_robot_node(串口 /dev/wheeltec_controller,115200)
   teb_local_planner.launch:
     作用: move_base + teb 局部规划器(默认方案)
@@ -152,7 +152,7 @@ launch_include:
   algorithm_gmapping.launch:
     作用: gmapping 建图算法
   algorithm_hector.launch:
-    作用: hector 建图算法(纯激光、无需里程计,含 trajectory_server + geotiff 保存)
+    作用: hector 建图算法(纯激光,无需里程计,含 trajectory_server + geotiff 保存)
   algorithm_karto.launch:
     作用: karto(SLAM)建图算法
   algorithm_cartographer.launch:
@@ -174,11 +174,11 @@ map:
 # ============================================================
 param_common:
   move_base_params.yaml:
-    作用: move_base 全局/局部规划器选型、控制/规划频率、恢复行为配置
+    作用: move_base 全局/局部规划器选型,控制/规划频率,恢复行为配置
   global_costmap_params.yaml:
-    作用: 全局代价地图(frame=map、三层插件 static/obstacle/inflation)
+    作用: 全局代价地图(frame=map,三层插件 static/obstacle/inflation)
   local_costmap_params.yaml:
-    作用: 局部代价地图(rolling_window、两层插件 obstacle/inflation)
+    作用: 局部代价地图(rolling_window,两层插件 obstacle/inflation)
   base_global_planner_param.yaml:
     作用: global_planner(Dijkstra/A*)参数
   dwa_local_planner_params.yaml:
@@ -195,9 +195,9 @@ param_common:
 scripts:
   wheeltec_udev.sh:
     作用: ★ 串口设备 udev 绑定脚本(需 sudo 运行一次)
-    内容: 按厂商 ID/序列号把 ttyUSB* 绑成固定名 /dev/wheeltec_controller、/dev/wheeltec_lidar1、/dev/wheeltec_lidar2
+    内容: 按厂商 ID/序列号把 ttyUSB* 绑成固定名 /dev/wheeltec_controller,/dev/wheeltec_lidar1,/dev/wheeltec_lidar2
   send_mark.py:
-    作用: RViz 多点导航标记节点(订阅 /clicked_point 与 /send_mark_goal,发布 MarkerArray 与目标点,支持巡航、'c' 清空)
+    作用: RViz 多点导航标记节点(订阅 /clicked_point 与 /send_mark_goal,发布 MarkerArray 与目标点,支持巡航,'c' 清空)
   rviz_nav_console.py:
     作用: Qt 版 RViz 导航控制台(2D Pose Estimate / 2D Nav Goal 工具,航点保存/加载到 YAML)
   run_square.py:

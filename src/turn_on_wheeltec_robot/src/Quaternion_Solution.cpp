@@ -35,7 +35,7 @@ void Quaternion_Solution(float gx, float gy, float gz, float ax, float ay, float
   float qa, qb, qc;
   // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
   if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
-    // 首先把加速度计采集到的值(三维向量)转化为单位向量，即向量除以模
+    // 首先把加速度计采集到的值(三维向量)转化为单位向量,即向量除以模
     recipNorm = InvSqrt(ax * ax + ay * ay + az * az);
     ax *= recipNorm;
     ay *= recipNorm;
@@ -48,7 +48,7 @@ void Quaternion_Solution(float gx, float gy, float gz, float ax, float ay, float
     halfex = (ay * halfvz - az * halfvy);
     halfey = (az * halfvx - ax * halfvz);
     halfez = (ax * halfvy - ay * halfvx);
-    // 计算并应用积分反馈（如果启用）
+    // 计算并应用积分反馈(如果启用)
     if(twoKi > 0.0f) {
       integralFBx += twoKi * halfex * (1.0f / SAMPLING_FREQ);  // integral error scaled by Ki
       integralFBy += twoKi * halfey * (1.0f / SAMPLING_FREQ);

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""在Jetson运行：python3 scripts/diagnose_can.py --interface can0 [--json]。
+"""在Jetson运行:python3 scripts/diagnose_can.py --interface can0 [--json].
 
-不需要ROS，不加载内核模块，不修改接口，不打开CAN套接字，不发送报文。
-适用于排查Kvaser兼容版本是否已经形成SocketCAN网络接口。
+不需要ROS,不加载内核模块,不修改接口,不打开CAN套接字,不发送报文.
+适用于排查Kvaser兼容版本是否已经形成SocketCAN网络接口.
 """
 import argparse
 import json
 import os
 import sys
 
-# Windows重定向终端可能默认cp1252；固定UTF-8以保证中文诊断可复制。
+# Windows重定向终端可能默认cp1252;固定UTF-8以保证中文诊断可复制.
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 

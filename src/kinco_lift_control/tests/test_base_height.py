@@ -1,4 +1,4 @@
-"""底盘运动限速、顶端米制高度及在线定位降速；全部使用内存传输。"""
+"""底盘运动限速,顶端米制高度及在线定位降速;全部使用内存传输."""
 import pathlib
 import sys
 import time
@@ -22,7 +22,7 @@ class MovingChassisTests(unittest.TestCase):
         self.p.command(0.2, 0, 0)
         self.assertEqual(self.p.speed_limit_rpm(1000, 100), 100)
         self.assertEqual(self.p.health_reason(), '')
-        self.assertTrue(self.p.reason())  # 旧严格停车策略仍可选。
+        self.assertTrue(self.p.reason())  # 旧严格停车策略仍可选.
 
     def test_actual_linear_and_angular_movement_reduce_cap(self):
         for vx, vy, wz in ((0.1, 0, 0), (0, 0.1, 0), (0, 0, 0.1)):
@@ -145,13 +145,13 @@ class HeightAndSpeedTests(unittest.TestCase):
             self.axis.apply_speed_limits()
 
     def test_position_mode_also_slows_at_upper_zone(self):
-        # 扩大人工仿真预算只用于策略单测，不是实机工作制设置。
+        # 扩大人工仿真预算只用于策略单测,不是实机工作制设置.
         self.axis.cfg.timeout = 300
         self.axis.budget.limit = 300
         self.start_position()
         self.axis.move_top_height(0.8 + 4.15)
         self.bus.position = 119400000
-        self.axis.feedback_time = None  # 人工放置，分区测试；坐标跳变另有专门用例。
+        self.axis.feedback_time = None  # 人工放置,分区测试;坐标跳变另有专门用例.
         self.axis.poll()
         self.assertEqual(self.axis.position_rpm, 100)
 
@@ -159,7 +159,7 @@ class HeightAndSpeedTests(unittest.TestCase):
         self.start_position()
         self.axis.move_top_height(1.1)
         self.bus.position = self.bus.target
-        self.axis.feedback_time = None  # 人工模拟到位，不代表真实运动跳变可放行。
+        self.axis.feedback_time = None  # 人工模拟到位,不代表真实运动跳变可放行.
         self.bus.moving = False
         self.bus.od[(0x6041, 0)][2] |= 0x400
         self.axis.poll()

@@ -1,4 +1,4 @@
-"""无ROS的方向键解析、方向相关速度区和运行时间预算。"""
+"""无ROS的方向键解析,方向相关速度区和运行时间预算."""
 import math
 
 
@@ -29,7 +29,7 @@ class SpeedZones:
             raise ValueError('Invalid keyboard positions, slow zones or endpoint inset.')
 
     def rpm(self, position, direction, lower_limit=False, upper_limit=False):
-        """只在接近本次运动方向的端部时降速，另一端限位不阻止退出。"""
+        """只在接近本次运动方向的端部时降速,另一端限位不阻止退出."""
         if direction == 1:
             return (0 if upper_limit or position >= self.upper_stop else
                     self.slow if position >= self.up_switch else self.fast)
@@ -42,9 +42,9 @@ class SpeedZones:
 
 
 class MotionBudget:
-    """进程内累计预算；松键/复位/短暂停顿不恢复，仅完整静止冷却恢复。
+    """进程内累计预算;松键/复位/短暂停顿不恢复,仅完整静止冷却恢复.
 
-    重启不证明冷却完成。本类不是热模型，不替代厂家工作制或硬件保护。
+    重启不证明冷却完成.本类不是热模型,不替代厂家工作制或硬件保护.
     """
     def __init__(self, limit_s=110, rest_s=1080):
         self.limit, self.rest = float(limit_s), float(rest_s)
@@ -79,7 +79,7 @@ class MotionBudget:
 
 
 class ArrowParser:
-    """解析CSI/SS3方向键及分包；终端不能提供真实key-up，须配合超时。"""
+    """解析CSI/SS3方向键及分包;终端不能提供真实key-up,须配合超时."""
     def __init__(self):
         self.pending = b''
 

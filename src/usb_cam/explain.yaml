@@ -1,52 +1,52 @@
 # # ============================================================
-# # usb_cam 功能包说明（Wheeltec 机器人定制版）
+# # usb_cam 功能包说明(Wheeltec 机器人定制版)
 # # ============================================================
 
 # 包名: usb_cam
 # 版本: 0.3.6
-# 来源: bosch-ros-pkg/usb_cam（ROS 官方 V4L USB 摄像头驱动包）
+# 来源: bosch-ros-pkg/usb_cam(ROS 官方 V4L USB 摄像头驱动包)
 # 许可证: BSD
 
 # # ---------- 这个包是干什么的 ----------
 # 作用: >
-#   原版功能：基于 V4L(Video4Linux) 的 USB 摄像头 ROS 驱动，
-#   读取 /dev/video* 设备并发布图像话题（如 /usb_cam/image_raw）。
+#   原版功能:基于 V4L(Video4Linux) 的 USB 摄像头 ROS 驱动,
+#   读取 /dev/video* 设备并发布图像话题(如 /usb_cam/image_raw).
 #   >
-#   但在 Wheeltec 机器人中【没有直接使用原版 C++ 节点】，
-#   因为车上用的是奥比中光 Astra 深度相机，自带 astra_camera 驱动。
-#   本包被改造为【图像话题转发/压缩节点】：
-#   订阅 Astra 相机发布的 RGB 压缩图像，重新编码后再发布，
-#   供手机 APP 远程查看摄像头画面使用。
+#   但在 Wheeltec 机器人中[没有直接使用原版 C++ 节点],
+#   因为车上用的是奥比中光 Astra 深度相机,自带 astra_camera 驱动.
+#   本包被改造为[图像话题转发/压缩节点]:
+#   订阅 Astra 相机发布的 RGB 压缩图像,重新编码后再发布,
+#   供手机 APP 远程查看摄像头画面使用.
 
 # # ---------- 目录结构 ----------
 # 目录说明:
-#   src/usb_cam.cpp:      原版 C++ 驱动核心代码（V4L 抓图，本车未使用）
-#   nodes/usb_cam_node.cpp: 原版 C++ 节点入口（本车未使用）
+#   src/usb_cam.cpp:      原版 C++ 驱动核心代码(V4L 抓图,本车未使用)
+#   nodes/usb_cam_node.cpp: 原版 C++ 节点入口(本车未使用)
 #   include/usb_cam:      原版头文件
-#   scripts/app_read.py:  ★ 实际使用的节点，图像压缩转发（见下）
-#   scripts/image_read.py: 测试脚本，用 OpenCV 显示 beedog.jpg，仅学习用
+#   scripts/app_read.py:  ★ 实际使用的节点,图像压缩转发(见下)
+#   scripts/image_read.py: 测试脚本,用 OpenCV 显示 beedog.jpg,仅学习用
 #   scripts/beedog.jpg:   image_read.py 的测试图片
-#   launch/usb_cam-test.launch: ★ 启动文件（见下）
-#   ost.yaml:             相机标定参数文件（camera_calibration 输出格式）
-#   package.xml:          依赖声明（image_transport、ffmpeg、cv_bridge 等）
+#   launch/usb_cam-test.launch: ★ 启动文件(见下)
+#   ost.yaml:             相机标定参数文件(camera_calibration 输出格式)
+#   package.xml:          依赖声明(image_transport,ffmpeg,cv_bridge 等)
 #   CMakeLists.txt:       编译规则
 
 # # ---------- 启动流程 (launch/usb_cam-test.launch) ----------
 # 启动流程:
 #   步骤1: include astra_camera/launch/astra.launch → 启动 Astra 深度相机驱动
-#   步骤2: 运行 usb_cam 包里的 app_read.py 节点（节点名 usb_cam）
+#   步骤2: 运行 usb_cam 包里的 app_read.py 节点(节点名 usb_cam)
 #   步骤3: 话题重映射 /usb_cam/image_raw/compressed → /image_raw/compressed
-#   注意: 文件中被注释掉的 usb_cam_node 段是原版 USB 摄像头用法，备用；
-#         注释明确说明：使用 Astra 相机时不能开原版 usb_cam 功能。
+#   注意: 文件中被注释掉的 usb_cam_node 段是原版 USB 摄像头用法,备用;
+#         注释明确说明:使用 Astra 相机时不能开原版 usb_cam 功能.
 
 # # ---------- app_read.py 节点逻辑 ----------
 # app_read节点:
-#   订阅话题: /camera/rgb/image_raw/compressed (sensor_msgs/CompressedImage，来自 Astra 相机)
+#   订阅话题: /camera/rgb/image_raw/compressed (sensor_msgs/CompressedImage,来自 Astra 相机)
 #   处理:     压缩数据 → numpy 数组 → cv2.imdecode 解码 → cv2.imencode('.jpg') 重新压缩
 #   发布话题: /usb_cam/image_raw/compressed → 经 launch 重映射为 /image_raw/compressed
-#   用途:     压缩图像带宽小，供手机 APP / 上位机通过 WiFi 实时查看摄像头画面
-#   注意:     代码中 np.fromstring / tostring 是 numpy 旧接口，
-#             在新版 numpy(>=1.24) 会报错，需改为 np.frombuffer / tobytes
+#   用途:     压缩图像带宽小,供手机 APP / 上位机通过 WiFi 实时查看摄像头画面
+#   注意:     代码中 np.fromstring / tostring 是 numpy 旧接口,
+#             在新版 numpy(>=1.24) 会报错,需改为 np.frombuffer / tobytes
 
 # # ---------- 常用命令 ----------
 # 常用命令:
@@ -56,7 +56,7 @@
 
 # # ---------- 常见问题 ----------
 # 常见问题:
-#   - 画面打不开: 确认 Astra 相机已插好且 astra.launch 正常启动，
+#   - 画面打不开: 确认 Astra 相机已插好且 astra.launch 正常启动,
 #     检查 /camera/rgb/image_raw/compressed 是否有数据
 #   - numpy 报错: 见上面 app_read.py 的旧接口问题
-#   - 不要取消注释 launch 里的 usb_cam_node 段，会和 Astra 相机冲突
+#   - 不要取消注释 launch 里的 usb_cam_node 段,会和 Astra 相机冲突

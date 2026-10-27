@@ -3,14 +3,14 @@
               适配版本日期:2026-08-25
 ================================================================
 
-【环境说明】
+[环境说明]
 - 系统:aarch64 (ARM64) + ROS Noetic + Python3
 - 底盘:wheeltec 差速底盘(2 驱动轮 + 4 万向轮),car_mode = mini_diff
 - 雷达:镭神 M10 × 2(双雷达模式 ls_M10_double)
 - 导航栈:apt 安装的 noetic 官方包(amcl / move_base / map_server /
   gmapping / teb_local_planner / robot_pose_ekf)
 - 工作空间只保留 6 个包:
-    turn_on_wheeltec_robot  核心:底盘串口驱动、launch、导航参数、地图
+    turn_on_wheeltec_robot  核心:底盘串口驱动,launch,导航参数,地图
     lsm10_v2                镭神 M10 雷达驱动
     rrt_exploration         RRT 自主探索建图
     world_canvas_msgs       地图保存服务(rrt_exploration 依赖)
@@ -18,7 +18,7 @@
     wheeltec_joy_control    手柄遥控
 
 ================================================================
-一、编译工作空间(修改代码后执行)
+一,编译工作空间(修改代码后执行)
 ================================================================
 cd ~/wheeltec_robot
 rm -rf build devel          # 彻底重编时先清理(平时可省略)
@@ -29,17 +29,17 @@ catkin_make
 source ~/wheeltec_robot/devel/setup.bash
 
 ================================================================
-二、最小启动:底盘 + 雷达(自检用)
+二,最小启动:底盘 + 雷达(自检用)
 ================================================================
 roslaunch turn_on_wheeltec_robot turn_on_wheeltec_robot.launch
 
-说明:启动以下节点——
+说明:启动以下节点--
   1. wheeltec_robot_node  底盘串口节点(默认串口 /dev/wheeltec_controller,
      115200),订阅 /cmd_vel 控制电机,发布轮式里程计
   2. robot_pose_ekf       融合轮式里程计 + IMU,发布 odom_combined →
      base_footprint 的 TF
   3. robot_state_publisher + 静态 TF(含雷达安装位置)
-注意:此 launch 不含雷达。雷达由建图/导航 launch 自动启动,
+注意:此 launch 不含雷达.雷达由建图/导航 launch 自动启动,
      也可单独启动验证:
 roslaunch lsm10_v2 lsm10_v2.launch      # 默认双雷达(if_double:=true)
 
@@ -54,17 +54,17 @@ rostopic hz /scan                       # 看发布频率
   # 需要手柄接管时, 另开终端
   roslaunch wheeltec_joy joy_control.launch
 
-  行为：导航正常跑；手柄一推立即接管；松手后机器人立即停下，0.5 秒后导航自动恢复继续走向目标。
+  行为:导航正常跑;手柄一推立即接管;松手后机器人立即停下,0.5 秒后导航自动恢复继续走向目标.
 
 ================================================================
-三、遥控(建图时用)
+三,遥控(建图时用)
 ================================================================
 键盘遥控(新终端):
 roslaunch wheeltec_robot_rc keyboard_teleop.launch
 # 按提示按键移动(u/i/o/j/k/l/m/,/.),k 急停,q/z 加减速度
 
 ================================================================
-四、建图(gmapping)
+四,建图(gmapping)
 ================================================================
 roslaunch turn_on_wheeltec_robot mapping.launch
 
@@ -76,7 +76,7 @@ roslaunch turn_on_wheeltec_robot mapping.launch
   - 用键盘遥控小车走遍整个区域,建图效果可在 rviz 中查看:
       rviz    # 添加 Map 显示,话题 /map
 
-【保存地图】二选一:
+[保存地图]二选一:
   方式1(一键保存,保存为 map/WHEELTEC.pgm 和 WHEELTEC.yaml):
       roslaunch turn_on_wheeltec_robot map_saver.launch
   方式2(手动指定文件名):
@@ -85,7 +85,7 @@ roslaunch turn_on_wheeltec_robot mapping.launch
       # 生成 mymap.pgm 和 mymap.yaml
 
 ================================================================
-五、导航(核心任务)
+五,导航(核心任务)
 ================================================================
 1) 先修改导航使用的地图文件:
    编辑 ~/wheeltec_robot/src/turn_on_wheeltec_robot/launch/navigation.launch
@@ -105,17 +105,17 @@ roslaunch turn_on_wheeltec_robot mapping.launch
    - 先用 "2D Pose Estimate" 给定初始位姿(amcl 需要)
    - 用 "2D Nav Goal" 点击目标点,小车自动规划路径前往
 
-【多点巡航】send_mark.py 已随 navigation.launch 自动启动:
+[多点巡航]send_mark.py 已随 navigation.launch 自动启动:
    - rviz 工具栏 "Publish Point" 连续点击多个目标点,
      小车到达一个后自动前往下一个,全部到达后循环巡航
    - 在运行 send_mark 的终端按 'c' 清空所有目标点
 
-【备选:图形化导航控制台】(需图形界面)
+[备选:图形化导航控制台](需图形界面)
    roslaunch turn_on_wheeltec_robot rviz_nav_console.launch
    (需先启动 navigation.launch)
 
 ================================================================
-六、RRT 自主探索建图(可选:不用遥控,小车自己探索)
+六,RRT 自主探索建图(可选:不用遥控,小车自己探索)
 ================================================================
 roslaunch turn_on_wheeltec_robot rrt_slam.launch
 
@@ -126,7 +126,7 @@ roslaunch turn_on_wheeltec_robot rrt_slam.launch
   - 建完图同样用第四节的方法保存地图
 
 ================================================================
-七、常用调试命令
+七,常用调试命令
 ================================================================
 roscore                              # 单独启动 roscore(一般用不上,roslaunch 自带)
 rosnode list                         # 查看运行中的节点
@@ -144,32 +144,32 @@ sudo chmod 777 /dev/wheeltec_controller
 sudo ~/wheeltec_robot/src/turn_on_wheeltec_robot/scripts/wheeltec_udev.sh
 
 ================================================================
-八、关键参数文件位置(需要按实机核对/调整)
+八,关键参数文件位置(需要按实机核对/调整)
 ================================================================
 1) 机器人外形(影响避障!按实机尺寸修改):
    turn_on_wheeltec_robot/costmap_common_params/param_mini_diff/
      costmap_common_params.yaml  → footprint(默认约 23×18cm)
 2) 速度/加速度限制:
    同目录 teb_local_planner_params.yaml → max_vel_x 等
-3) 雷达安装位置 TF(实测!默认 X 前 0.125m、高 0.16m、朝后安装):
+3) 雷达安装位置 TF(实测!默认 X 前 0.125m,高 0.16m,朝后安装):
    turn_on_wheeltec_robot/launch/robot_model_visualization.launch
    搜索 "mini_diff",修改 base_to_laser 一行
-4) 通用导航参数(全局/局部代价地图、amcl、move_base):
+4) 通用导航参数(全局/局部代价地图,amcl,move_base):
    turn_on_wheeltec_robot/param_common/*.yaml
 5) 底盘串口参数:
    turn_on_wheeltec_robot/launch/include/base_serial.launch
-   (串口设备名、波特率、坐标系名称)
+   (串口设备名,波特率,坐标系名称)
 6) 雷达扫描范围/屏蔽角度:
    turn_on_wheeltec_robot/launch/wheeltec_lidar.launch
 
 ================================================================
-九、本次 Noetic 适配修改记录(2026-08-25)
+九,本次 Noetic 适配修改记录(2026-08-25)
 ================================================================
-1. 删除 24 个无关/过时包(视觉、语音、标定、其他型号雷达、
+1. 删除 24 个无关/过时包(视觉,语音,标定,其他型号雷达,
    melodic 版导航栈/gmapping/teb/robot_pose_ekf 源码等),
    导航栈改用 apt 的 noetic 官方版本
-2. Python2 → Python3:send_mark.py、rviz_nav_console.py、
-   rrt_exploration 4 个脚本、turtlebot_teleop_key.py
+2. Python2 → Python3:send_mark.py,rviz_nav_console.py,
+   rrt_exploration 4 个脚本,turtlebot_teleop_key.py
    (getfrontier.py 另修复 tab/空格混用 + OpenCV4 的
    findContours 双返回值 API)
 3. lsm10_v2/CMakeLists.txt:删除硬编码 PCL1.8 路径,
@@ -181,10 +181,10 @@ sudo ~/wheeltec_robot/src/turn_on_wheeltec_robot/scripts/wheeltec_udev.sh
      (原配置每次启动必报错),car_mode 默认改为 mini_diff
    - 删除 9 个 3D/视觉导航 launch(rtabmap/astra/pure3d 等)
 5. map/map_saver.launch:保存路径 /home/wheeltec → /home/phm
-6. 已安装 apt 包:ros-noetic-teb-local-planner、
+6. 已安装 apt 包:ros-noetic-teb-local-planner,
    ros-noetic-robot-pose-ekf
 
-【注意事项】
+[注意事项]
 - 若以后换单雷达,把 wheeltec_lidar.launch 第 2 行
   ls_M10_double 改为 ls_M10_single
 - teb 规划器插件由 move_base 运行时加载,若启动导航时报

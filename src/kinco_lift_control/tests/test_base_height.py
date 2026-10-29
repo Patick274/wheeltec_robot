@@ -155,6 +155,20 @@ class HeightAndSpeedTests(unittest.TestCase):
         self.axis.poll()
         self.assertEqual(self.axis.position_rpm, 100)
 
+    def test_position_mode_also_slows_at_lower_zone_when_descending(self):
+        """下行越过3060000减速开关同样降到100rpm;与上行119390000对称."""
+        self.start_position()
+        self.bus.position = 10000000
+        self.axis.feedback_time = None  # 人工放置,分区测试;坐标跳变另有专门用例.
+        self.axis.poll()
+        self.axis.move(10, 37.5)
+        self.assertEqual(self.axis.position_rpm, 1000)
+        self.bus.position = 3000000
+        self.axis.feedback_time = None
+        self.axis.poll()
+        self.assertEqual(self.axis.position_rpm, 100)
+        self.assertEqual(self.bus.od[(0x6081, 0)][2], self.cfg.velocity_raw(100))
+
     def test_profile_speed_clears_after_arrival_for_base_permission(self):
         self.start_position()
         self.axis.move_top_height(1.1)

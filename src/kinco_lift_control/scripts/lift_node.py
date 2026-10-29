@@ -5,6 +5,7 @@ roslaunch kinco_lift_control lift.launch:实物默认只读.
 roslaunch kinco_lift_control lift.launch simulate:=true:内存模拟,不打开CAN.
 详细步骤和文件关系见包根目录explain.yaml.
 """
+import atexit
 import json
 import math
 import threading
@@ -60,6 +61,9 @@ class LiftNode:
         self.axis = LiftController(sdo, self.cfg,
                                    self.parking.health_reason if self.allow_moving else self.parking.reason,
                                    self.current_speed_cap)
+        # rospy.on_shutdown只在signal_shutdown时运行;崩溃退出的未处理异常不触发它,
+        # 必须另挂解释器级兜底,否则驱动器残留60FF继续溜车(2026-10-27事故).
+        atexit.register(self.failsafe_shutdown)
         self.action_lock = threading.RLock()  # ROS服务线程与轮询线程共享同一控制轴.
         self.closing = False
         self.status_pub = rospy.Publisher('~status', String, queue_size=1, latch=True)
@@ -202,7 +206,7 @@ class LiftNode:
         return TriggerResponse(*self._run(self.axis.reference_here))
 
     def recover_to_lower_limit(self, req):
-        """Trigger:独立受控恢复;下限位未触发且位置高于参考时,慢速下行至触发."""
+        """Trigger:启动受监督的回下限位恢复;回执只代表启动,完成/故障看status."""
         return TriggerResponse(*self._run(self.axis.recover_to_lower_limit))
 
     def move(self, req):
@@ -264,17 +268,44 @@ class LiftNode:
             time.sleep(max(0, 1 / self.poll_hz - (time.monotonic() - started)))
 
     def shutdown(self):
-        """防止ROS重复调用退出回调;退出前请求停机并释放CAN资源."""
+        """防止ROS重复调用退出回调;退出前请求停机并释放CAN资源.
+
+        停机只有SDO回执,不等于电机已停稳;回执缺失时明确记录,由兜底和驱动器监督接管.
+        """
         with self.action_lock:
             if not self.closing:
                 self.closing = True
                 self.axis.close()
+                if self.axis.took_control and not self.axis.stop_confirmed:
+                    rospy.logerr('Stop NOT acknowledged during shutdown (or nothing to stop); '
+                                 'failsafe at exit and drive-side supervision are the backstop.')
+
+    def failsafe_shutdown(self):
+        """atexit最后手段:崩溃绕过了正常shutdown时,仍清零60FF并关断驱动器.
+
+        只对已接管驱动器的会话生效;close已确认停机后不再重复写.
+        覆盖不到SIGKILL/os._exit/断电/未处理信号——那些路径没有Python清理机会,
+        只能靠驱动器自身节点保护(名义200ms x 3,未实测端到端时间)与机械保持.
+        """
+        try:
+            self.axis.failsafe_halt()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
     rospy.init_node('lift')
+    node = None
     try:
-        LiftNode().run()
+        node = LiftNode()
+        node.run()
     except (CanError, OSError, LiftError, ValueError) as exc:
         rospy.logfatal('Lift startup failed: %s', exc)
         raise SystemExit(1)
+    finally:
+        # 正常/可处理异常退出都走同一幂等清理;清理失败不覆盖原始异常.
+        if node is not None:
+            try:
+                node.shutdown()
+            except Exception as cleanup_exc:
+                rospy.logerr('Lift cleanup failed during exit: %s', cleanup_exc)

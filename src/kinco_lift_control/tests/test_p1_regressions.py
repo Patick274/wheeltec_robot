@@ -1,6 +1,7 @@
 """前三项审查问题的回归;仅使用内存CAN及ROS桩,不连接硬件."""
 import pathlib
 import sys
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -131,6 +132,9 @@ class ControllerP1Tests(unittest.TestCase):
     def test_disabled_session_also_invalidates_coordinate_jump(self):
         self.start_position()
         self.axis.disable()
+        # 进程存活期间guard帧必须继续流动,撤防会让重新使能后的运动被判通信中断.
+        self.assertTrue(self.axis.guard_active)
+        self.assertEqual(self.bus.od[(0x100C, 0)][2], 200)
         self.bus.position += 10000000
         with self.assertRaisesRegex(LiftError, 'jump'):
             self.axis.poll()
@@ -176,17 +180,102 @@ class ControllerP1Tests(unittest.TestCase):
         self.axis.disable()
 
     def test_recover_to_lower_limit_enables_reference(self):
-        """恢复流程应慢速下行至下限位触发,停稳后可正常建立参考."""
+        """恢复是受监督的异步状态:启动后由poll驱动,到下限位停稳撤使能,再建参考."""
         inset_counts = round(5 * 65536 / 2.25)
         self.bus.position = 147599 + inset_counts
         self.axis.poll()
-        self.axis.recover_to_lower_limit()
+        self.axis.recover_to_lower_limit(rpm=100)
+        self.assertTrue(self.axis.recovering)
+        self.assertTrue(self.axis.armed)
+        deadline = time.monotonic() + 5
+        while self.axis.recovering and time.monotonic() < deadline:
+            self.axis.poll()
+            time.sleep(0.005)
+        self.assertFalse(self.axis.recovering)
         lower, _ = self.axis._limits()
         self.assertTrue(lower)
         self.assertFalse(self.bus.moving)
+        self.assertFalse(self.axis.armed)
+        # 恢复收尾后guard帧继续流动,不撤防(与disable一致;实机回归2026-10-28).
+        self.assertEqual(self.bus.od[(0x100C, 0)][2], 200)
+        self.assertTrue(self.axis.guard_active)
         self.axis.reference_here()
         self.assertTrue(self.axis.frame_confirmed)
         self.assertIsNotNone(self.axis.reference)
+
+    def test_recovery_requires_stationary_chassis(self):
+        """底盘反馈缺失/未停稳时拒绝恢复,不能绕过常规停车联锁(复盘4.4)."""
+        self.reason = 'Chassis odometry missing/stale'
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        with self.assertRaisesRegex(LiftError, 'stale'):
+            self.axis.recover_to_lower_limit()
+        self.assertFalse(self.axis.recovering)
+        self.assertFalse(self.bus.enabled)
+        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
+
+    def test_recovery_requires_motion_budget(self):
+        """工作制预算耗尽时拒绝恢复;预算在恢复期间也持续累计."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.budget.used = self.axis.budget.limit
+        with self.assertRaisesRegex(LiftError, 'budget'):
+            self.axis.recover_to_lower_limit()
+        self.assertFalse(self.axis.recovering)
+
+    def test_recovery_timeout_is_fault_latched_not_silent(self):
+        """恢复超时按故障锁存处理,撤销任务;不是静默返回."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.recover_to_lower_limit(rpm=100)
+        self.axis.recover_deadline = time.monotonic() - 1
+        with self.assertRaisesRegex(LiftError, 'timeout|Lower limit'):
+            self.axis.poll()
+        self.axis.fail('recovery timeout')
+        self.assertTrue(self.axis.latched)
+        self.assertFalse(self.axis.recovering)
+        self.assertFalse(self.bus.moving)
+
+    def test_recovery_stop_service_interrupts_descent(self):
+        """恢复中途stop可介入:撤销恢复状态,快停写入,故障锁存."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.recover_to_lower_limit(rpm=100)
+        self.axis.poll()
+        self.assertNotEqual(self.bus.od[(0x60FF, 0)][2], 0)
+        self.axis.stop()
+        self.assertFalse(self.axis.recovering)
+        self.assertFalse(self.axis.armed)
+        self.assertTrue(self.axis.latched)
+        # 快停是6040=0x000B,不改60FF寄存器;驱动器按6085减速停车.
+        self.assertEqual(self.bus.od[(0x6040, 0)][2], 0x000B)
+        self.assertFalse(self.bus.moving)
+
+    def test_recovery_moving_wrong_direction_aborts(self):
+        """恢复只能向下;位置反向上行立即中止,不等到超时."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.recover_to_lower_limit(rpm=100)
+        self.bus.position += 1000000  # 人工模拟反向漂移.
+        self.axis.feedback_time = None  # 坐标跳变核验另有专门用例.
+        with self.assertRaisesRegex(LiftError, 'away'):
+            self.axis.poll()
+        self.axis.fail('wrong direction')
+        self.assertFalse(self.axis.recovering)
+
+    def test_chassis_callback_does_not_break_recovery(self):
+        """恢复期间底盘回调不得触发键盘轮询;回归:真机恢复因此被中止(2026-10-28)."""
+        inset_counts = round(5 * 65536 / 2.25)
+        self.bus.position = 147599 + inset_counts
+        self.axis.poll()
+        self.axis.recover_to_lower_limit(rpm=100)
+        self.axis.apply_speed_limits()
+        self.assertTrue(self.axis.recovering)
+        self.assertNotEqual(self.bus.od[(0x60FF, 0)][2], 0)
 
 
 class NodeP1Tests(unittest.TestCase):

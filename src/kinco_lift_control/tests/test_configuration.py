@@ -60,7 +60,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(cfg.keyboard_enabled)
         self.assertEqual(cfg.counts, 65536)
         self.assertEqual(cfg.mm_rev, 2.25)
-        self.assertIsNone(cfg.initial_top_height)
+        # 2026-10-28 用户实测H0=2.05m(下限位静止);此前必须为None,未知不能填占位值.
+        self.assertEqual(cfg.initial_top_height, 2.05)
         self.assertEqual(cfg.moving_max_rpm, 100)
 
     def test_simulated_overlay_and_launch_are_consistent(self):

@@ -118,9 +118,18 @@ class LiftController:
         self.slow_latched = False
         self.command_rpm = 0
         self.position_rpm = 0
+        # 回下限位恢复是poll监督的明确状态,不是持锁的同步循环.
+        self.recovering = False
+        self.recover_deadline = self.recover_start = None
+        self.recover_velocity = 0
         self.budget = MotionBudget(config.budget_seconds, config.cooldown_seconds)
         self.feedback_position = self.feedback_time = None
         self.stop_event = threading.Event()
+        self.closed = False
+        # 接管标志:本会话首次试图改变驱动器状态之前置位;纯只读会话退出不得写驱动器.
+        self.took_control = False
+        # 只记录close路径的停机回执,不代表电机已停稳;停稳只能由反馈确认.
+        self.stop_confirmed = False
         self.guard_thread = threading.Thread(target=self._guard_loop, daemon=True)
         self.guard_thread.start()
 
@@ -196,9 +205,9 @@ class LiftController:
             if not self.armed:
                 return
             self._check_interlock()
-            if self.control_mode == 3:
+            if self.control_mode == 3 and not self.recovering:
                 self._keyboard_poll()
-            elif self.busy:
+            elif self.busy and not self.recovering:
                 self._refresh_position_speed()
 
     def _height(self, counts):
@@ -271,7 +280,9 @@ class LiftController:
                         raise LiftError('No fresh toggling node-guard response.')
                 if not self.word & 4:
                     raise LiftError('Drive unexpectedly left operation-enabled state.')
-            if self.armed and self.control_mode == 3:
+            if self.armed and self.recovering:
+                self._recover_poll()
+            elif self.armed and self.control_mode == 3:
                 if self.sdo.read(0x6061, size=1, signed=True) != 3:
                     raise LiftError('Keyboard operation lost profile velocity mode.')
                 self._keyboard_poll()
@@ -307,6 +318,50 @@ class LiftController:
                     self.last_error = ''
             return self.status()
 
+    def _enable_drive(self, mode):
+        """6/7/F使能握手+停止策略+节点保护配置;调用方须先完成许可检查并置took_control.
+
+        使能中途失败时驱动器状态不确定:took_control已置位,进程退出由failsafe覆盖,
+        运行中由节点_run在guard_active/poisoned时转fail处理.
+        """
+        self.control_mode = mode
+        # 先进入运行就绪,避免接管其他软件遗留的运动模式或目标.
+        self._write(0x6040, 0x0006)
+        self._wait_word(lambda w: w & 0x6F == 0x21)
+        self._verified_write(0x60FF, 0, size=4, signed=True)
+        self._verified_write(0x6060, mode, size=1, signed=True)
+        # 停止策略:快停用6085减速度;禁用/关机采用曲线停止.
+        self._verified_write(0x605A, 2, signed=True)
+        self._verified_write(0x605B, 1, signed=True)
+        self._verified_write(0x605C, 1, signed=True)
+        self._verified_write(0x605D, 2, signed=True)  # bit8暂停:按6085减速,保留使能.
+        self._verified_write(0x605E, 2, signed=True)
+        self._verified_write(0x6083, self.cfg.acceleration_raw(self.cfg.accel), size=4)
+        self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
+        self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
+        # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
+        self._verified_write(0x1017, 0)
+        self._verified_write(0x100C, 200)
+        self._verified_write(0x100D, 3, size=1)
+        if self.sdo.read(0x100E, size=4) != 0x700 + self.sdo.node_id:
+            raise LiftError('Unexpected node-guard COB-ID; restore it in KS3 first.')
+        self._verified_write(0x6007, 1, signed=True)
+        self.guard_active = True
+        self.guard_since = time.monotonic()
+        self.sdo.guard_time = self.sdo.guard_toggle = None
+        self.sdo.nmt(0x01)
+        self.sdo.guard()
+        self._wait_word(lambda w: self.sdo.guard_time is not None)
+        # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
+        self._write(0x607A, self.position, size=4, signed=True)
+        self._write(0x6040, 0x0007)
+        self._wait_word(lambda w: w & 0x6F == 0x23)
+        self._check_interlock()
+        self._write(0x6040, 0x000F)
+        self._wait_word(lambda w: w & 0x6F == 0x27)
+        if self.sdo.read(0x6061, size=1, signed=True) != mode:
+            raise LiftError('Effective operating mode differs from requested mode.')
+
     def enable(self, keyboard=False):
         """显式使能:检查条件 -> 关断旧指令 -> 配置 -> 6/7/F状态握手."""
         with self.lock:
@@ -323,43 +378,8 @@ class LiftController:
             self.poll()
             if self.budget.remaining <= 0:
                 raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
-            # 先进入运行就绪,避免接管其他软件遗留的运动模式或目标.
-            self._write(0x6040, 0x0006)
-            self._wait_word(lambda w: w & 0x6F == 0x21)
-            self.control_mode = 3 if keyboard else 1
-            self._verified_write(0x60FF, 0, size=4, signed=True)
-            self._verified_write(0x6060, self.control_mode, size=1, signed=True)
-            # 停止策略:快停用6085减速度;禁用/关机采用曲线停止.
-            self._verified_write(0x605A, 2, signed=True)
-            self._verified_write(0x605B, 1, signed=True)
-            self._verified_write(0x605C, 1, signed=True)
-            self._verified_write(0x605D, 2, signed=True)  # bit8暂停:按6085减速,保留使能.
-            self._verified_write(0x605E, 2, signed=True)
-            self._verified_write(0x6083, self.cfg.acceleration_raw(self.cfg.accel), size=4)
-            self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
-            self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
-            # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
-            self._verified_write(0x1017, 0)
-            self._verified_write(0x100C, 200)
-            self._verified_write(0x100D, 3, size=1)
-            if self.sdo.read(0x100E, size=4) != 0x700 + self.sdo.node_id:
-                raise LiftError('Unexpected node-guard COB-ID; restore it in KS3 first.')
-            self._verified_write(0x6007, 1, signed=True)
-            self.guard_active = True
-            self.guard_since = time.monotonic()
-            self.sdo.guard_time = self.sdo.guard_toggle = None
-            self.sdo.nmt(0x01)
-            self.sdo.guard()
-            self._wait_word(lambda w: self.sdo.guard_time is not None)
-            # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
-            self._write(0x607A, self.position, size=4, signed=True)
-            self._write(0x6040, 0x0007)
-            self._wait_word(lambda w: w & 0x6F == 0x23)
-            self._check_interlock()
-            self._write(0x6040, 0x000F)
-            self._wait_word(lambda w: w & 0x6F == 0x27)
-            if self.sdo.read(0x6061, size=1, signed=True) != self.control_mode:
-                raise LiftError('Effective operating mode differs from requested mode.')
+            self.took_control = True
+            self._enable_drive(3 if keyboard else 1)
             self.armed = True
             self.key_direction = 0
             self.key_time = None
@@ -382,21 +402,27 @@ class LiftController:
             self.target_mm = None
 
     def recover_to_lower_limit(self, rpm=50, timeout_s=10):
-        """独立恢复建参考流程:位置高于下端参考但下限位未触发时,慢速下行至触发下限位.
+        """启动受监督的回下限位恢复:未使能/空闲/无故障时慢速下行至下限位触发.
 
-        仅在未使能/空闲/无故障/已配置速度区时下允许调用;不撤销实物门禁.
-        完成后机构静止在下限位,需要显式调reference_here才会建立会话参考.
-        不屏蔽硬限位、不扩大普通行程、不修改参考计数.
+        与正常运动同等待遇(复盘4.4):入口检查底盘联锁/工作制预算/限位/位置,
+        使能握手与节点保护统一复用_enable_drive,运行期由poll持续监督故障/模式/
+        方向/预算,不全程独占控制锁,/lift/stop可中断.
+        服务返回只代表已启动;完成情况与故障看status/busy.完成后机构静止在下限位
+        且未使能,需显式reference_here建立会话参考.
+        不屏蔽硬限位,不清编码器,不扩大普通行程,不自动续跑旧目标.
         """
         with self.lock:
             self.cfg.validate_motion(require_travel=False)
-            if self.armed or self.busy or self.stopping or self.latched:
+            if self.armed or self.busy or self.stopping or self.latched or self.recovering:
                 raise LiftError('Recovery requires a disabled, idle, non-faulted axis.')
             if not self.cfg.zones:
                 raise LiftError('Recovery requires configured raw zones.')
             if not 1 <= rpm <= 100:
                 raise LiftError('Recovery speed must be within 1..100 rpm.')
+            self._check_interlock()
             self.poll()
+            if self.budget.remaining <= 0:
+                raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
             lower, upper = self._limits()
             if lower:
                 raise LiftError('Lower limit already active; call reference_here directly.')
@@ -405,48 +431,49 @@ class LiftController:
             tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
             if self.position <= self.cfg.zones.lower + tolerance:
                 raise LiftError('Position already at/below lower reference; check wiring/sensor.')
-            # 速度模式慢速下行,触发下限位后立即停车并撤使能.
-            self._write(0x6040, 0x0006)
-            self._wait_word(lambda w: w & 0x6F == 0x21)
-            self._verified_write(0x6060, 3, size=1, signed=True)
-            self._verified_write(0x60FF, 0, size=4, signed=True)
-            self._write(0x6040, 0x0007)
-            self._wait_word(lambda w: w & 0x6F == 0x23)
-            self._write(0x6040, 0x000F)
-            self._wait_word(lambda w: w & 0x6F == 0x27)
-            if self.sdo.read(0x6061, size=1, signed=True) != 3:
-                raise LiftError('Recovery failed to enter profile velocity mode.')
+            self.took_control = True
+            self._enable_drive(3)
             down_raw = self.cfg.velocity_raw(rpm)
-            signed_down = -down_raw if self.cfg.direction == 1 else down_raw
-            try:
-                self._write(0x60FF, signed_down, size=4, signed=True)
-                deadline = time.monotonic() + timeout_s
-                triggered = False
-                while time.monotonic() < deadline:
-                    self.inputs = self.sdo.read(0x60FD)
-                    lower, _ = self._limits()
-                    if lower:
-                        triggered = True
-                        break
-                    time.sleep(0.02)
-                self._write(0x60FF, 0, size=4, signed=True)
-                if not triggered:
-                    raise LiftError('Lower limit not reached within recovery timeout.')
-                # 真实反馈停稳再退出.
-                deadline = time.monotonic() + 2
-                while time.monotonic() < deadline:
-                    self.velocity = self.sdo.read(0x606C, signed=True)
-                    if abs(self.velocity) <= self.cfg.velocity_raw(1):
-                        break
-                    time.sleep(0.02)
-                else:
-                    raise LiftError('Recovery stop did not reach standstill within 2 seconds.')
-            finally:
-                self._write(0x6040, 0x0007)
-                self._wait_word(lambda w: w & 0x6F == 0x23)
-                self._write(0x6040, 0x0006)
-                self._wait_word(lambda w: w & 0x6F == 0x21)
-            self.poll()
+            self.recover_velocity = -down_raw if self.cfg.direction == 1 else down_raw
+            self._write(0x60FF, self.recover_velocity, size=4, signed=True)
+            self.recover_start = self.position
+            self.recover_deadline = time.monotonic() + timeout_s
+            self.armed = self.recovering = self.busy = True
+            self.last_error = 'Recovery descending; confirm lower limit and standstill in /lift/status.'
+
+    def _recover_poll(self):
+        """恢复下行的周期监督:到限位后清零速度,确认停稳再撤使能.
+
+        超时,反向,上限位触发,模式丢失都按故障处理;每拍重申下行速度,
+        外部清零(如keyboard_stop)不能悄悄冻结恢复,彻底停止用/lift/stop.
+        """
+        if self.sdo.read(0x6061, size=1, signed=True) != 3:
+            raise LiftError('Recovery lost profile velocity mode.')
+        lower, upper = self._limits()
+        if upper:
+            raise LiftError('Upper limit active during recovery descent; inspect wiring/sensor.')
+        if ((self.position - self.recover_start) * self.cfg.direction
+                > self._tolerance_counts()):
+            raise LiftError('Recovery moved away from the lower limit; aborting.')
+        if not lower:
+            if time.monotonic() > self.recover_deadline:
+                raise LiftError('Lower limit not reached within recovery timeout.')
+            self._write(0x60FF, self.recover_velocity, size=4, signed=True)
+            return
+        self._write(0x60FF, 0, size=4, signed=True)
+        if abs(self.velocity) > self.cfg.velocity_raw(1):
+            if time.monotonic() > self.recover_deadline + 2:
+                raise LiftError('Recovery stop did not reach standstill within 2 seconds.')
+            return
+        self._write(0x6040, 0x0007)
+        self._wait_word(lambda w: w & 0x6F == 0x23)
+        self._write(0x6040, 0x0006)
+        self._wait_word(lambda w: w & 0x6F == 0x21)
+        # 进程存活期间guard帧继续流动;撤防100C会让重新使能后的运动被判通信中断.
+        self.armed = False
+        self.recovering = self.busy = False
+        self.recover_velocity = 0
+        self.last_error = 'Recovery complete at lower limit; call reference_here to establish reference.'
 
     def _record_checked_reference(self):
         """位置/键盘共用核验,不能把新零点套入旧的绝对计数速度区."""
@@ -680,6 +707,8 @@ class LiftController:
             self.neutral_required = True
             self.command_rpm = 0
             self.position_rpm = 0
+            self.recovering = False
+            self.recover_velocity = 0
             confirmed = False
             self.position_halting = self.position_halted = False
             self.halt_started = None
@@ -693,7 +722,11 @@ class LiftController:
             return confirmed
 
     def disable(self):
-        """确认定位结束/停稳后取消使能;取消后电机可能失去保持力."""
+        """确认定位结束/停稳后取消使能;取消后电机可能失去保持力.
+
+        进程存活期间guard帧继续流动(不撤防):实机验证disable时撤防100C
+        会让下次重新使能后的运动被驱动器判"CAN总线中断"(EMCY 0x8100, 2026-10-28).
+        """
         with self.lock:
             self.poll()
             if self.busy or self.stopping:
@@ -747,6 +780,7 @@ class LiftController:
                     keyboard_neutral_required=self.neutral_required,
                     commanded_rpm=self.command_rpm,
                     profile_rpm=self.position_rpm,
+                    recovering=self.recovering,
                     initial_top_height_m=initial,
                     top_height_m=(initial + height_mm / 1000 if initial is not None and height_mm is not None else None),
                     target_top_height_m=(initial + self.target_mm / 1000
@@ -762,10 +796,42 @@ class LiftController:
         self.frame_confirmed = False
         return self.stop(reason)
 
+    def failsafe_halt(self):
+        """进程崩溃退出的兜底:本会话接管过驱动器才尽力清零速度指令并关断.
+
+        2026-10-27事故:节点异常退出没走close,驱动器残留mode3+60FF,机构上漂60mm.
+        纯只读且未接管的会话退出时不写——另一会话可能正在控制该轴(复盘4.2).
+        SDO会话已失效时降级为单向尽力发送;发送成功不代表驱动器已停稳.
+        覆盖不到SIGKILL/os._exit/断电/致命信号,那些路径只能靠驱动器自身
+        节点保护(名义200ms x 3,未经实测)与独立机械保持.
+        """
+        if not self.took_control or (self.closed and self.stop_confirmed):
+            return
+        try:
+            with self.lock:
+                try:
+                    self._write(0x60FF, 0, size=4, signed=True)
+                    self._write(0x6040, 0x0006)
+                except (CanError, OSError):
+                    self.sdo.halt_unconfirmed()
+        except Exception:
+            pass  # 解释器退出阶段任何异常都不能阻碍进程结束.
+
     def close(self):
-        """退出时请求停止,结束节点保护线程并关闭适配器,不自动再次连接."""
-        self.stop('Node shutdown')
+        """退出时请求停止,结束节点保护线程并关闭适配器,不自动再次连接.
+
+        停机得到回执后撤防节点保护(100C=0):干净退出不应在驱动器侧留下
+        "CAN总线中断"故障(2026-10-27/28两次重启均复现2602=0x1000);
+        停机未确认或崩溃路径绝不撤防,监督超时是它们唯一的驱动器侧兜底.
+        """
+        self.stop_confirmed = self.stop('Node shutdown')
+        if self.stop_confirmed:
+            try:
+                self._write(0x100C, 0)
+            except (CanError, OSError):
+                pass
         self.guard_active = False
         self.stop_event.set()
         self.guard_thread.join(timeout=0.5)
         self.sdo.transport.close()
+        self.closed = True

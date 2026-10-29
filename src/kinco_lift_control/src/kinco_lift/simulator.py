@@ -41,6 +41,8 @@ class SimulatedCan:
             (0x606C, 0): [4, True, 0], (0x60FD, 0): [4, False, 1],
             (0x2601, 0): [2, False, 0], (0x607A, 0): [4, True, 0],
             (0x2602, 0): [2, False, 0],
+            (0x1001, 0): [1, False, 0], (0x1003, 0): [1, False, 0],
+            (0x1003, 1): [4, False, 0],
             (0x6081, 0): [4, False, 1],
             (0x6083, 0): [4, False, 1], (0x6084, 0): [4, False, 1],
             (0x6085, 0): [4, False, 1], (0x605A, 0): [2, True, 0],
@@ -54,15 +56,19 @@ class SimulatedCan:
         }
 
     def _step(self):
-        """按墙钟推进位置,并模拟节点保护超时;没有真实机械动力学."""
+        """按墙钟推进位置,并模拟节点保护超时;没有真实机械动力学.
+
+        超时故障按FD1X5手册7.12节建模:2602 bit1(0x0002)是看门狗位;
+        2601 bit0 是扩展错误位,不用于表示看门狗超时.
+        """
         now = time.monotonic()
         dt, self.last_time = now - self.last_time, now
         if self.last_guard is not None and self.od[(0x6007, 0)][2] == 1:
             timeout = self.od[(0x100C, 0)][2] * self.od[(0x100D, 0)][2] / 1000.0
-            if now - self.last_guard > timeout:
+            if timeout > 0 and now - self.last_guard > timeout:  # 100C=0按CiA301是关闭监督.
                 self.moving = self.enabled = False
                 self.od[(0x6041, 0)][2] = 0x38
-                self.od[(0x2601, 0)][2] = 1
+                self.od[(0x2602, 0)][2] |= 0x0002
         speed_raw = self.od[(0x6081, 0)][2]
         counts_s = speed_raw * 1875 / 512 / 60
         velocity = 0
@@ -97,6 +103,7 @@ class SimulatedCan:
         if value == 0x86:
             self.enabled = self.moving = False
             self.od[(0x2601, 0)][2] = 0
+            self.od[(0x2602, 0)][2] = 0
             self.od[(0x6041, 0)][2] = 0x31
             self.last_guard = time.monotonic() if self.last_guard is not None else None
         elif value in (0x0B, 0x02):

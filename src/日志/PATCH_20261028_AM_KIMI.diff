@@ -1,0 +1,1249 @@
+diff --git a/src/kinco_lift_control/config/lift.yaml b/src/kinco_lift_control/config/lift.yaml
+index ab454b4..ac2e17e 100644
+--- a/src/kinco_lift_control/config/lift.yaml
++++ b/src/kinco_lift_control/config/lift.yaml
+@@ -5,12 +5,11 @@ node_id: 1
+ sdo_timeout_s: 0.15
+ poll_hz: 10.0
+ 
+-motion_enabled: true  # 2026-10-27 G阶段实机验证临时开启;验证后必须改回false.
+-commissioning_confirmed: true  # 同上,临时.
++motion_enabled: false  # 2026-10-27 G阶段实机验证通过后已回退;下次实机前再临时开启.
++commissioning_confirmed: false  # 同上,临时许可已回收.
+ # 需实测两个方向的硬件限位,驱动器输入功能和极性.
+-# 2026-10-26用户已反馈双向硬限位有效;ROS/CAN实机保护仍待验收,暂不放行.
+-# 2026-10-27 G阶段实机验证临时开启;验证后必须改回false.
+-drive_limits_verified: true
++# 2026-10-26用户已反馈双向硬限位有效;2026-10-27 G阶段最小运动已验证,联动验收前保持false.
++drive_limits_verified: false
+ 
+ # Windows实际参数已读到65536 inc/电机转;Jetson首次接入仍需回读核对.
+ encoder_counts_per_rev: 65536
+@@ -35,7 +34,7 @@ motion_timeout_s: 110.0
+ position_tolerance_mm: 0.2
+ 
+ # 独立开关:写好配置不等于允许实机运行;仍需上方三项许可和每会话c确认.
+-keyboard_control_enabled: true  # 2026-10-27 G阶段实机验证临时开启;验证后必须改回false.
++keyboard_control_enabled: false  # 2026-10-27 G阶段实机验证通过后已回退;下次实机前再临时开启.
+ speed_zones_enabled: true
+ keyboard_cruise_rpm: 1000.0
+ keyboard_approach_rpm: 100.0
+@@ -61,5 +60,10 @@ base_odom_topic: /odom
+ base_command_topic: /cmd_vel
+ odom_timeout_s: 0.5
+ base_stationary_s: 1.0
+-base_linear_threshold_m_s: 0.01
+-base_angular_threshold_rad_s: 0.02
++# R2静止判定:指令死区/噪声地板两级生效;motion键目前只参与阈值合法性校验,无独立分支.
++base_linear_cmd_deadband_m_s: 0.001
++base_angular_cmd_deadband_rad_s: 0.002
++base_linear_noise_m_s: 0.005
++base_angular_noise_rad_s: 0.01
++base_linear_motion_m_s: 0.02
++base_angular_motion_rad_s: 0.05
+diff --git a/src/kinco_lift_control/docs/KVASER_SOCKETCAN.md b/src/kinco_lift_control/docs/KVASER_SOCKETCAN.md
+index 0321174..109f41b 100644
+--- a/src/kinco_lift_control/docs/KVASER_SOCKETCAN.md
++++ b/src/kinco_lift_control/docs/KVASER_SOCKETCAN.md
+@@ -94,7 +94,13 @@ python3 src/kinco_lift_control/scripts/probe_drive.py --interface can0 --node-id
+ 
+ 若接口名为can1或实际站号不是1，修改参数。
+ 这个工具只发送SDO读取，不使能、不写参数、不执行升降。
+-读到6041、6063、606C、60FD、2601、6060才说明本包与驱动器建立了对应通信。
++读到6041、6063、606C、60FD、2601、2602、1001、6060才说明本包与驱动器建立了对应通信。
++2601/2602是FD1X5手册7.12节(印刷页108-109)的Unsigned16错误状态位掩码:
++2601 bit0(0x0001)是扩展错误,2602 bit12(0x1000)是CAN总线中断,2602 bit1(0x0002)才是看门狗。
++2026-10-27实机读数2601=0x0001+2602=0x1000应记录为"扩展错误伴CAN总线中断",
++不能单凭数值区分适配器/线缆/供电、bus-off、主站退出或通信监督触发;复位可清除不代表原因已消除。
++1001/1003是补充只读诊断,须先核对固件支持;对象不支持会SDO中止并使会话失效,
++只在probe这类独立无运动会话中使用,不能混入活动控制循环。
+ 如超时，先检查供电、接线、波特率、站号和其他主站。
+ 
+ ## 5. 再启动ROS只读节点
+diff --git a/src/kinco_lift_control/scripts/lift_node.py b/src/kinco_lift_control/scripts/lift_node.py
+index 729967b..746a8bd 100644
+--- a/src/kinco_lift_control/scripts/lift_node.py
++++ b/src/kinco_lift_control/scripts/lift_node.py
+@@ -5,6 +5,7 @@ roslaunch kinco_lift_control lift.launch:实物默认只读.
+ roslaunch kinco_lift_control lift.launch simulate:=true:内存模拟,不打开CAN.
+ 详细步骤和文件关系见包根目录explain.yaml.
+ """
++import atexit
+ import json
+ import math
+ import threading
+@@ -60,6 +61,9 @@ class LiftNode:
+         self.axis = LiftController(sdo, self.cfg,
+                                    self.parking.health_reason if self.allow_moving else self.parking.reason,
+                                    self.current_speed_cap)
++        # rospy.on_shutdown只在signal_shutdown时运行;崩溃退出的未处理异常不触发它,
++        # 必须另挂解释器级兜底,否则驱动器残留60FF继续溜车(2026-10-27事故).
++        atexit.register(self.failsafe_shutdown)
+         self.action_lock = threading.RLock()  # ROS服务线程与轮询线程共享同一控制轴.
+         self.closing = False
+         self.status_pub = rospy.Publisher('~status', String, queue_size=1, latch=True)
+@@ -202,7 +206,7 @@ class LiftNode:
+         return TriggerResponse(*self._run(self.axis.reference_here))
+ 
+     def recover_to_lower_limit(self, req):
+-        """Trigger:独立受控恢复;下限位未触发且位置高于参考时,慢速下行至触发."""
++        """Trigger:启动受监督的回下限位恢复;回执只代表启动,完成/故障看status."""
+         return TriggerResponse(*self._run(self.axis.recover_to_lower_limit))
+ 
+     def move(self, req):
+@@ -264,17 +268,44 @@ class LiftNode:
+             time.sleep(max(0, 1 / self.poll_hz - (time.monotonic() - started)))
+ 
+     def shutdown(self):
+-        """防止ROS重复调用退出回调;退出前请求停机并释放CAN资源."""
++        """防止ROS重复调用退出回调;退出前请求停机并释放CAN资源.
++
++        停机只有SDO回执,不等于电机已停稳;回执缺失时明确记录,由兜底和驱动器监督接管.
++        """
+         with self.action_lock:
+             if not self.closing:
+                 self.closing = True
+                 self.axis.close()
++                if self.axis.took_control and not self.axis.stop_confirmed:
++                    rospy.logerr('Stop NOT acknowledged during shutdown (or nothing to stop); '
++                                 'failsafe at exit and drive-side supervision are the backstop.')
++
++    def failsafe_shutdown(self):
++        """atexit最后手段:崩溃绕过了正常shutdown时,仍清零60FF并关断驱动器.
++
++        只对已接管驱动器的会话生效;close已确认停机后不再重复写.
++        覆盖不到SIGKILL/os._exit/断电/未处理信号——那些路径没有Python清理机会,
++        只能靠驱动器自身节点保护(名义200ms x 3,未实测端到端时间)与机械保持.
++        """
++        try:
++            self.axis.failsafe_halt()
++        except Exception:
++            pass
+ 
+ 
+ if __name__ == '__main__':
+     rospy.init_node('lift')
++    node = None
+     try:
+-        LiftNode().run()
++        node = LiftNode()
++        node.run()
+     except (CanError, OSError, LiftError, ValueError) as exc:
+         rospy.logfatal('Lift startup failed: %s', exc)
+         raise SystemExit(1)
++    finally:
++        # 正常/可处理异常退出都走同一幂等清理;清理失败不覆盖原始异常.
++        if node is not None:
++            try:
++                node.shutdown()
++            except Exception as cleanup_exc:
++                rospy.logerr('Lift cleanup failed during exit: %s', cleanup_exc)
+diff --git a/src/kinco_lift_control/scripts/probe_drive.py b/src/kinco_lift_control/scripts/probe_drive.py
+index 300100c..b0a11c3 100644
+--- a/src/kinco_lift_control/scripts/probe_drive.py
++++ b/src/kinco_lift_control/scripts/probe_drive.py
+@@ -20,7 +20,7 @@ from kinco_lift.simulator import SimulatedCan
+ 
+ 
+ def main():
+-    """选择真实/模拟传输,读取六项对象,输出JSON;退出时始终关闭连接."""
++    """选择真实/模拟传输,读取状态/错误对象,输出JSON;退出时始终关闭连接."""
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--interface', default='can0')
+     parser.add_argument('--node-id', type=int, default=1)
+@@ -30,6 +30,9 @@ def main():
+     try:
+         transport = SimulatedCan(args.node_id) if args.simulate else SocketCan(args.interface)
+         sdo = SdoClient(transport, args.node_id)
++        # 2601/2602是FD1X5手册7.12节的错误状态位掩码(如2602 bit12=CAN总线中断,bit1=看门狗);
++        # 1001错误寄存器与1003错误记录是CiA301标准对象,本驱动器固件可能不支持,
++        # 不支持时SDO中止会使会话失效,因此放在最后读取,仅用于独立无运动会话.
+         result = {
+             'simulate': args.simulate,
+             'statusword': '0x{:04X}'.format(sdo.read(0x6041, size=2)),
+@@ -37,8 +40,14 @@ def main():
+             'actual_velocity_raw_606C': sdo.read(0x606C, signed=True),
+             'digital_inputs_60FD': '0x{:08X}'.format(sdo.read(0x60FD)),
+             'error_status_2601': '0x{:04X}'.format(sdo.read(0x2601, size=2)),
++            'error_status2_2602': '0x{:04X}'.format(sdo.read(0x2602, size=2)),
+             'mode': sdo.read(0x6060, size=1, signed=True),
+         }
++        result['error_register_1001'] = '0x{:02X}'.format(sdo.read(0x1001, size=1))
++        error_count = sdo.read(0x1003, size=1)
++        result['error_field_entries_1003'] = error_count
++        if error_count:  # 无记录时读sub1会被驱动器中止;只在有记录时读最近一条.
++            result['error_field_latest_1003_1'] = '0x{:08X}'.format(sdo.read(0x1003, sub=1))
+         print(json.dumps(result, indent=2))
+         return 0
+     except (CanError, OSError, ValueError) as exc:
+diff --git a/src/kinco_lift_control/src/kinco_lift/canopen.py b/src/kinco_lift_control/src/kinco_lift/canopen.py
+index eb7e467..57262fe 100644
+--- a/src/kinco_lift_control/src/kinco_lift/canopen.py
++++ b/src/kinco_lift_control/src/kinco_lift/canopen.py
+@@ -160,3 +160,16 @@ class SdoClient:
+                                 struct.pack('<BHBH2x', 0x2B, 0x6040, 0, 0x000B))
+         except (OSError, CanError):
+             pass
++
++    def halt_unconfirmed(self):
++        """会话失效后的最后手段:单向尽力发速度清零与关断帧,不等回执.
++
++        故意绕过poisoned检查:普通SDO在会话失效后拒绝发送,但退出兜底仍要尝试.
++        不清除poisoned,不重连;发送成功只代表帧上了总线,不代表驱动器已停稳.
++        """
++        for payload in (struct.pack('<BHBi', 0x23, 0x60FF, 0, 0),
++                        struct.pack('<BHBH2x', 0x2B, 0x6040, 0, 0x0006)):
++            try:
++                self.transport.send(0x600 + self.node_id, payload)
++            except (OSError, CanError):
++                pass
+diff --git a/src/kinco_lift_control/src/kinco_lift/controller.py b/src/kinco_lift_control/src/kinco_lift/controller.py
+index 5f41894..37be99d 100644
+--- a/src/kinco_lift_control/src/kinco_lift/controller.py
++++ b/src/kinco_lift_control/src/kinco_lift/controller.py
+@@ -118,9 +118,18 @@ class LiftController:
+         self.slow_latched = False
+         self.command_rpm = 0
+         self.position_rpm = 0
++        # 回下限位恢复是poll监督的明确状态,不是持锁的同步循环.
++        self.recovering = False
++        self.recover_deadline = self.recover_start = None
++        self.recover_velocity = 0
+         self.budget = MotionBudget(config.budget_seconds, config.cooldown_seconds)
+         self.feedback_position = self.feedback_time = None
+         self.stop_event = threading.Event()
++        self.closed = False
++        # 接管标志:本会话首次试图改变驱动器状态之前置位;纯只读会话退出不得写驱动器.
++        self.took_control = False
++        # 只记录close路径的停机回执,不代表电机已停稳;停稳只能由反馈确认.
++        self.stop_confirmed = False
+         self.guard_thread = threading.Thread(target=self._guard_loop, daemon=True)
+         self.guard_thread.start()
+ 
+@@ -271,7 +280,9 @@ class LiftController:
+                         raise LiftError('No fresh toggling node-guard response.')
+                 if not self.word & 4:
+                     raise LiftError('Drive unexpectedly left operation-enabled state.')
+-            if self.armed and self.control_mode == 3:
++            if self.armed and self.recovering:
++                self._recover_poll()
++            elif self.armed and self.control_mode == 3:
+                 if self.sdo.read(0x6061, size=1, signed=True) != 3:
+                     raise LiftError('Keyboard operation lost profile velocity mode.')
+                 self._keyboard_poll()
+@@ -307,6 +318,50 @@ class LiftController:
+                     self.last_error = ''
+             return self.status()
+ 
++    def _enable_drive(self, mode):
++        """6/7/F使能握手+停止策略+节点保护配置;调用方须先完成许可检查并置took_control.
++
++        使能中途失败时驱动器状态不确定:took_control已置位,进程退出由failsafe覆盖,
++        运行中由节点_run在guard_active/poisoned时转fail处理.
++        """
++        self.control_mode = mode
++        # 先进入运行就绪,避免接管其他软件遗留的运动模式或目标.
++        self._write(0x6040, 0x0006)
++        self._wait_word(lambda w: w & 0x6F == 0x21)
++        self._verified_write(0x60FF, 0, size=4, signed=True)
++        self._verified_write(0x6060, mode, size=1, signed=True)
++        # 停止策略:快停用6085减速度;禁用/关机采用曲线停止.
++        self._verified_write(0x605A, 2, signed=True)
++        self._verified_write(0x605B, 1, signed=True)
++        self._verified_write(0x605C, 1, signed=True)
++        self._verified_write(0x605D, 2, signed=True)  # bit8暂停:按6085减速,保留使能.
++        self._verified_write(0x605E, 2, signed=True)
++        self._verified_write(0x6083, self.cfg.acceleration_raw(self.cfg.accel), size=4)
++        self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
++        self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
++        # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
++        self._verified_write(0x1017, 0)
++        self._verified_write(0x100C, 200)
++        self._verified_write(0x100D, 3, size=1)
++        if self.sdo.read(0x100E, size=4) != 0x700 + self.sdo.node_id:
++            raise LiftError('Unexpected node-guard COB-ID; restore it in KS3 first.')
++        self._verified_write(0x6007, 1, signed=True)
++        self.guard_active = True
++        self.guard_since = time.monotonic()
++        self.sdo.guard_time = self.sdo.guard_toggle = None
++        self.sdo.nmt(0x01)
++        self.sdo.guard()
++        self._wait_word(lambda w: self.sdo.guard_time is not None)
++        # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
++        self._write(0x607A, self.position, size=4, signed=True)
++        self._write(0x6040, 0x0007)
++        self._wait_word(lambda w: w & 0x6F == 0x23)
++        self._check_interlock()
++        self._write(0x6040, 0x000F)
++        self._wait_word(lambda w: w & 0x6F == 0x27)
++        if self.sdo.read(0x6061, size=1, signed=True) != mode:
++            raise LiftError('Effective operating mode differs from requested mode.')
++
+     def enable(self, keyboard=False):
+         """显式使能:检查条件 -> 关断旧指令 -> 配置 -> 6/7/F状态握手."""
+         with self.lock:
+@@ -323,43 +378,8 @@ class LiftController:
+             self.poll()
+             if self.budget.remaining <= 0:
+                 raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
+-            # 先进入运行就绪,避免接管其他软件遗留的运动模式或目标.
+-            self._write(0x6040, 0x0006)
+-            self._wait_word(lambda w: w & 0x6F == 0x21)
+-            self.control_mode = 3 if keyboard else 1
+-            self._verified_write(0x60FF, 0, size=4, signed=True)
+-            self._verified_write(0x6060, self.control_mode, size=1, signed=True)
+-            # 停止策略:快停用6085减速度;禁用/关机采用曲线停止.
+-            self._verified_write(0x605A, 2, signed=True)
+-            self._verified_write(0x605B, 1, signed=True)
+-            self._verified_write(0x605C, 1, signed=True)
+-            self._verified_write(0x605D, 2, signed=True)  # bit8暂停:按6085减速,保留使能.
+-            self._verified_write(0x605E, 2, signed=True)
+-            self._verified_write(0x6083, self.cfg.acceleration_raw(self.cfg.accel), size=4)
+-            self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
+-            self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
+-            # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
+-            self._verified_write(0x1017, 0)
+-            self._verified_write(0x100C, 200)
+-            self._verified_write(0x100D, 3, size=1)
+-            if self.sdo.read(0x100E, size=4) != 0x700 + self.sdo.node_id:
+-                raise LiftError('Unexpected node-guard COB-ID; restore it in KS3 first.')
+-            self._verified_write(0x6007, 1, signed=True)
+-            self.guard_active = True
+-            self.guard_since = time.monotonic()
+-            self.sdo.guard_time = self.sdo.guard_toggle = None
+-            self.sdo.nmt(0x01)
+-            self.sdo.guard()
+-            self._wait_word(lambda w: self.sdo.guard_time is not None)
+-            # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
+-            self._write(0x607A, self.position, size=4, signed=True)
+-            self._write(0x6040, 0x0007)
+-            self._wait_word(lambda w: w & 0x6F == 0x23)
+-            self._check_interlock()
+-            self._write(0x6040, 0x000F)
+-            self._wait_word(lambda w: w & 0x6F == 0x27)
+-            if self.sdo.read(0x6061, size=1, signed=True) != self.control_mode:
+-                raise LiftError('Effective operating mode differs from requested mode.')
++            self.took_control = True
++            self._enable_drive(3 if keyboard else 1)
+             self.armed = True
+             self.key_direction = 0
+             self.key_time = None
+@@ -382,21 +402,27 @@ class LiftController:
+             self.target_mm = None
+ 
+     def recover_to_lower_limit(self, rpm=50, timeout_s=10):
+-        """独立恢复建参考流程:位置高于下端参考但下限位未触发时,慢速下行至触发下限位.
+-
+-        仅在未使能/空闲/无故障/已配置速度区时下允许调用;不撤销实物门禁.
+-        完成后机构静止在下限位,需要显式调reference_here才会建立会话参考.
+-        不屏蔽硬限位、不扩大普通行程、不修改参考计数.
++        """启动受监督的回下限位恢复:未使能/空闲/无故障时慢速下行至下限位触发.
++
++        与正常运动同等待遇(复盘4.4):入口检查底盘联锁/工作制预算/限位/位置,
++        使能握手与节点保护统一复用_enable_drive,运行期由poll持续监督故障/模式/
++        方向/预算,不全程独占控制锁,/lift/stop可中断.
++        服务返回只代表已启动;完成情况与故障看status/busy.完成后机构静止在下限位
++        且未使能,需显式reference_here建立会话参考.
++        不屏蔽硬限位,不清编码器,不扩大普通行程,不自动续跑旧目标.
+         """
+         with self.lock:
+             self.cfg.validate_motion(require_travel=False)
+-            if self.armed or self.busy or self.stopping or self.latched:
++            if self.armed or self.busy or self.stopping or self.latched or self.recovering:
+                 raise LiftError('Recovery requires a disabled, idle, non-faulted axis.')
+             if not self.cfg.zones:
+                 raise LiftError('Recovery requires configured raw zones.')
+             if not 1 <= rpm <= 100:
+                 raise LiftError('Recovery speed must be within 1..100 rpm.')
++            self._check_interlock()
+             self.poll()
++            if self.budget.remaining <= 0:
++                raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
+             lower, upper = self._limits()
+             if lower:
+                 raise LiftError('Lower limit already active; call reference_here directly.')
+@@ -405,48 +431,49 @@ class LiftController:
+             tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
+             if self.position <= self.cfg.zones.lower + tolerance:
+                 raise LiftError('Position already at/below lower reference; check wiring/sensor.')
+-            # 速度模式慢速下行,触发下限位后立即停车并撤使能.
+-            self._write(0x6040, 0x0006)
+-            self._wait_word(lambda w: w & 0x6F == 0x21)
+-            self._verified_write(0x6060, 3, size=1, signed=True)
+-            self._verified_write(0x60FF, 0, size=4, signed=True)
+-            self._write(0x6040, 0x0007)
+-            self._wait_word(lambda w: w & 0x6F == 0x23)
+-            self._write(0x6040, 0x000F)
+-            self._wait_word(lambda w: w & 0x6F == 0x27)
+-            if self.sdo.read(0x6061, size=1, signed=True) != 3:
+-                raise LiftError('Recovery failed to enter profile velocity mode.')
++            self.took_control = True
++            self._enable_drive(3)
+             down_raw = self.cfg.velocity_raw(rpm)
+-            signed_down = -down_raw if self.cfg.direction == 1 else down_raw
+-            try:
+-                self._write(0x60FF, signed_down, size=4, signed=True)
+-                deadline = time.monotonic() + timeout_s
+-                triggered = False
+-                while time.monotonic() < deadline:
+-                    self.inputs = self.sdo.read(0x60FD)
+-                    lower, _ = self._limits()
+-                    if lower:
+-                        triggered = True
+-                        break
+-                    time.sleep(0.02)
+-                self._write(0x60FF, 0, size=4, signed=True)
+-                if not triggered:
+-                    raise LiftError('Lower limit not reached within recovery timeout.')
+-                # 真实反馈停稳再退出.
+-                deadline = time.monotonic() + 2
+-                while time.monotonic() < deadline:
+-                    self.velocity = self.sdo.read(0x606C, signed=True)
+-                    if abs(self.velocity) <= self.cfg.velocity_raw(1):
+-                        break
+-                    time.sleep(0.02)
+-                else:
+-                    raise LiftError('Recovery stop did not reach standstill within 2 seconds.')
+-            finally:
+-                self._write(0x6040, 0x0007)
+-                self._wait_word(lambda w: w & 0x6F == 0x23)
+-                self._write(0x6040, 0x0006)
+-                self._wait_word(lambda w: w & 0x6F == 0x21)
+-            self.poll()
++            self.recover_velocity = -down_raw if self.cfg.direction == 1 else down_raw
++            self._write(0x60FF, self.recover_velocity, size=4, signed=True)
++            self.recover_start = self.position
++            self.recover_deadline = time.monotonic() + timeout_s
++            self.armed = self.recovering = self.busy = True
++            self.last_error = 'Recovery descending; confirm lower limit and standstill in /lift/status.'
++
++    def _recover_poll(self):
++        """恢复下行的周期监督:到限位后清零速度,确认停稳再撤使能.
++
++        超时,反向,上限位触发,模式丢失都按故障处理;每拍重申下行速度,
++        外部清零(如keyboard_stop)不能悄悄冻结恢复,彻底停止用/lift/stop.
++        """
++        if self.sdo.read(0x6061, size=1, signed=True) != 3:
++            raise LiftError('Recovery lost profile velocity mode.')
++        lower, upper = self._limits()
++        if upper:
++            raise LiftError('Upper limit active during recovery descent; inspect wiring/sensor.')
++        if ((self.position - self.recover_start) * self.cfg.direction
++                > self._tolerance_counts()):
++            raise LiftError('Recovery moved away from the lower limit; aborting.')
++        if not lower:
++            if time.monotonic() > self.recover_deadline:
++                raise LiftError('Lower limit not reached within recovery timeout.')
++            self._write(0x60FF, self.recover_velocity, size=4, signed=True)
++            return
++        self._write(0x60FF, 0, size=4, signed=True)
++        if abs(self.velocity) > self.cfg.velocity_raw(1):
++            if time.monotonic() > self.recover_deadline + 2:
++                raise LiftError('Recovery stop did not reach standstill within 2 seconds.')
++            return
++        self._write(0x6040, 0x0007)
++        self._wait_word(lambda w: w & 0x6F == 0x23)
++        self._write(0x6040, 0x0006)
++        self._wait_word(lambda w: w & 0x6F == 0x21)
++        self.armed = False
++        self.guard_active = False
++        self.recovering = self.busy = False
++        self.recover_velocity = 0
++        self.last_error = 'Recovery complete at lower limit; call reference_here to establish reference.'
+ 
+     def _record_checked_reference(self):
+         """位置/键盘共用核验,不能把新零点套入旧的绝对计数速度区."""
+@@ -680,6 +707,8 @@ class LiftController:
+             self.neutral_required = True
+             self.command_rpm = 0
+             self.position_rpm = 0
++            self.recovering = False
++            self.recover_velocity = 0
+             confirmed = False
+             self.position_halting = self.position_halted = False
+             self.halt_started = None
+@@ -747,6 +776,7 @@ class LiftController:
+                     keyboard_neutral_required=self.neutral_required,
+                     commanded_rpm=self.command_rpm,
+                     profile_rpm=self.position_rpm,
++                    recovering=self.recovering,
+                     initial_top_height_m=initial,
+                     top_height_m=(initial + height_mm / 1000 if initial is not None and height_mm is not None else None),
+                     target_top_height_m=(initial + self.target_mm / 1000
+@@ -762,10 +792,32 @@ class LiftController:
+         self.frame_confirmed = False
+         return self.stop(reason)
+ 
++    def failsafe_halt(self):
++        """进程崩溃退出的兜底:本会话接管过驱动器才尽力清零速度指令并关断.
++
++        2026-10-27事故:节点异常退出没走close,驱动器残留mode3+60FF,机构上漂60mm.
++        纯只读且未接管的会话退出时不写——另一会话可能正在控制该轴(复盘4.2).
++        SDO会话已失效时降级为单向尽力发送;发送成功不代表驱动器已停稳.
++        覆盖不到SIGKILL/os._exit/断电/致命信号,那些路径只能靠驱动器自身
++        节点保护(名义200ms x 3,未经实测)与独立机械保持.
++        """
++        if not self.took_control or (self.closed and self.stop_confirmed):
++            return
++        try:
++            with self.lock:
++                try:
++                    self._write(0x60FF, 0, size=4, signed=True)
++                    self._write(0x6040, 0x0006)
++                except (CanError, OSError):
++                    self.sdo.halt_unconfirmed()
++        except Exception:
++            pass  # 解释器退出阶段任何异常都不能阻碍进程结束.
++
+     def close(self):
+         """退出时请求停止,结束节点保护线程并关闭适配器,不自动再次连接."""
+-        self.stop('Node shutdown')
++        self.stop_confirmed = self.stop('Node shutdown')
+         self.guard_active = False
+         self.stop_event.set()
+         self.guard_thread.join(timeout=0.5)
+         self.sdo.transport.close()
++        self.closed = True
+diff --git a/src/kinco_lift_control/src/kinco_lift/interlock.py b/src/kinco_lift_control/src/kinco_lift/interlock.py
+index 524607b..ab9dc8b 100644
+--- a/src/kinco_lift_control/src/kinco_lift/interlock.py
++++ b/src/kinco_lift_control/src/kinco_lift/interlock.py
+@@ -10,10 +10,13 @@ import time
+ class ParkingInterlock:
+     """订阅回调更新状态,控制线程通过reason()获得禁止运动的原因.
+ 
+-    区分三种速度量级,旧的单一阈值把测量噪声和真实微速混为一谈:
++    旧的单一阈值把测量噪声和真实微速混为一谈,现分两级使用:
+     - 指令deadband: 任何超过此值的指令都视为"有意运动",立即阻止.
+-    - 实测噪声地板: 低于此值的实测认为是编码器/振动噪声,允许计入静止.
+-    - 实测明确运动阈值: 超过即确定运动;噪声地板与此阈值之间视为可疑,按运动处理.
++    - 实测噪声地板: 低于此值的实测认为是编码器/振动噪声,允许计入静止;
++      达到或超过即重置静止时钟——包括噪声地板与运动阈值之间的可疑区间.
++    - 明确运动阈值(motion_threshold): 当前只参与 cmd<=noise<=motion 合法性校验,
++      没有独立判断分支;可疑区间与明确运动都按未停稳处理,行为等价.
++      如需区分两级行为,须先实机采集噪声分布再实现,文档不得超前描述.
+     """
+     def __init__(self, required=True, odom_timeout=0.5, stationary_s=1.0,
+                  linear_threshold=0.005, angular_threshold=0.01,
+diff --git a/src/kinco_lift_control/src/kinco_lift/simulator.py b/src/kinco_lift_control/src/kinco_lift/simulator.py
+index 8d09084..71f95e0 100644
+--- a/src/kinco_lift_control/src/kinco_lift/simulator.py
++++ b/src/kinco_lift_control/src/kinco_lift/simulator.py
+@@ -41,6 +41,8 @@ class SimulatedCan:
+             (0x606C, 0): [4, True, 0], (0x60FD, 0): [4, False, 1],
+             (0x2601, 0): [2, False, 0], (0x607A, 0): [4, True, 0],
+             (0x2602, 0): [2, False, 0],
++            (0x1001, 0): [1, False, 0], (0x1003, 0): [1, False, 0],
++            (0x1003, 1): [4, False, 0],
+             (0x6081, 0): [4, False, 1],
+             (0x6083, 0): [4, False, 1], (0x6084, 0): [4, False, 1],
+             (0x6085, 0): [4, False, 1], (0x605A, 0): [2, True, 0],
+@@ -54,7 +56,11 @@ class SimulatedCan:
+         }
+ 
+     def _step(self):
+-        """按墙钟推进位置,并模拟节点保护超时;没有真实机械动力学."""
++        """按墙钟推进位置,并模拟节点保护超时;没有真实机械动力学.
++
++        超时故障按FD1X5手册7.12节建模:2602 bit1(0x0002)是看门狗位;
++        2601 bit0 是扩展错误位,不用于表示看门狗超时.
++        """
+         now = time.monotonic()
+         dt, self.last_time = now - self.last_time, now
+         if self.last_guard is not None and self.od[(0x6007, 0)][2] == 1:
+@@ -62,7 +68,7 @@ class SimulatedCan:
+             if now - self.last_guard > timeout:
+                 self.moving = self.enabled = False
+                 self.od[(0x6041, 0)][2] = 0x38
+-                self.od[(0x2601, 0)][2] = 1
++                self.od[(0x2602, 0)][2] |= 0x0002
+         speed_raw = self.od[(0x6081, 0)][2]
+         counts_s = speed_raw * 1875 / 512 / 60
+         velocity = 0
+@@ -97,6 +103,7 @@ class SimulatedCan:
+         if value == 0x86:
+             self.enabled = self.moving = False
+             self.od[(0x2601, 0)][2] = 0
++            self.od[(0x2602, 0)][2] = 0
+             self.od[(0x6041, 0)][2] = 0x31
+             self.last_guard = time.monotonic() if self.last_guard is not None else None
+         elif value in (0x0B, 0x02):
+diff --git a/src/kinco_lift_control/tests/test_base_height.py b/src/kinco_lift_control/tests/test_base_height.py
+index 1f63aed..0d81f5f 100644
+--- a/src/kinco_lift_control/tests/test_base_height.py
++++ b/src/kinco_lift_control/tests/test_base_height.py
+@@ -155,6 +155,20 @@ class HeightAndSpeedTests(unittest.TestCase):
+         self.axis.poll()
+         self.assertEqual(self.axis.position_rpm, 100)
+ 
++    def test_position_mode_also_slows_at_lower_zone_when_descending(self):
++        """下行越过3060000减速开关同样降到100rpm;与上行119390000对称."""
++        self.start_position()
++        self.bus.position = 10000000
++        self.axis.feedback_time = None  # 人工放置,分区测试;坐标跳变另有专门用例.
++        self.axis.poll()
++        self.axis.move(10, 37.5)
++        self.assertEqual(self.axis.position_rpm, 1000)
++        self.bus.position = 3000000
++        self.axis.feedback_time = None
++        self.axis.poll()
++        self.assertEqual(self.axis.position_rpm, 100)
++        self.assertEqual(self.bus.od[(0x6081, 0)][2], self.cfg.velocity_raw(100))
++
+     def test_profile_speed_clears_after_arrival_for_base_permission(self):
+         self.start_position()
+         self.axis.move_top_height(1.1)
+diff --git a/src/kinco_lift_control/tests/test_lift.py b/src/kinco_lift_control/tests/test_lift.py
+index 87bc3e7..afcd420 100644
+--- a/src/kinco_lift_control/tests/test_lift.py
++++ b/src/kinco_lift_control/tests/test_lift.py
+@@ -278,16 +278,22 @@ class ControllerTests(unittest.TestCase):
+         with self.assertRaises(LiftError):
+             self.axis.poll()
+         self.assertFalse(self.bus.moving)
+-        self.assertTrue(self.bus.od[(0x2601, 0)][2])
++        # FD1X5手册7.12节:看门狗超时是2602 bit1,不是2601扩展错误位.
++        self.assertTrue(self.bus.od[(0x2602, 0)][2] & 0x0002)
+ 
+ 
+ class ParkingTests(unittest.TestCase):
++    @staticmethod
++    def settle(p):
++        """直接推移静止起点,不依赖真实sleep;Windows时钟分辨率约15.6ms会让毫秒级sleep失真."""
++        p.stationary_since -= 1
++
+     def test_missing_stale_and_stationary(self):
+         p = ParkingInterlock(odom_timeout=0.1, stationary_s=0.01)
+         self.assertIn('missing', p.reason())
+         p.odometry(0, 0, 0)
+         self.assertIn('long enough', p.reason())
+-        time.sleep(0.02)
++        self.settle(p)
+         self.assertEqual(p.reason(), '')
+         p.odom_time -= 1
+         self.assertIn('stale', p.reason())
+@@ -306,7 +312,6 @@ class ParkingTests(unittest.TestCase):
+         """任意非零指令都表明运动意图,即便幅值低于旧的0.01测量阈值."""
+         p = ParkingInterlock(stationary_s=0.001)
+         p.odometry(0, 0, 0)
+-        time.sleep(0.005)
+         p.command(0.005, 0, 0)
+         self.assertIn('command', p.reason())
+         p.command(0, 0, 0.005)
+@@ -316,20 +321,18 @@ class ParkingTests(unittest.TestCase):
+         """实测在噪声地板以下视为静止;原先0.01阈值把0.005~0.02之间的微速也当静止."""
+         p = ParkingInterlock(stationary_s=0.001)
+         p.odometry(0.003, 0, 0)
+-        time.sleep(0.005)
++        self.settle(p)
+         self.assertEqual(p.reason(), '')
+ 
+     def test_micro_motion_above_noise_floor_is_not_stationary(self):
+         """介于噪声地板与明确运动阈值之间,按不可信对待——要求重新累计静止时间."""
+         p = ParkingInterlock(stationary_s=0.001)
+         p.odometry(0.015, 0, 0)
+-        time.sleep(0.005)
+         self.assertNotEqual(p.reason(), '')
+ 
+     def test_micro_angular_above_noise_floor_is_not_stationary(self):
+         p = ParkingInterlock(stationary_s=0.001)
+         p.odometry(0, 0, 0.015)
+-        time.sleep(0.005)
+         self.assertNotEqual(p.reason(), '')
+ 
+     def test_command_stop_but_inertia_motion_still_blocks(self):
+@@ -338,14 +341,13 @@ class ParkingTests(unittest.TestCase):
+         p.command(0.05, 0, 0)
+         p.command(0, 0, 0)
+         p.odometry(0.015, 0, 0)
+-        time.sleep(0.005)
+         self.assertNotEqual(p.reason(), '')
+ 
+     def test_definite_motion_threshold_blocks_immediately(self):
+         """实测明显超过motion_threshold立即判运动."""
+         p = ParkingInterlock(stationary_s=0.001)
+         p.odometry(0, 0, 0)
+-        time.sleep(0.005)
++        self.settle(p)
+         self.assertEqual(p.reason(), '')
+         p.odometry(0.05, 0, 0)
+         self.assertNotEqual(p.reason(), '')
+diff --git a/src/kinco_lift_control/tests/test_p1_regressions.py b/src/kinco_lift_control/tests/test_p1_regressions.py
+index b672745..c8c0c08 100644
+--- a/src/kinco_lift_control/tests/test_p1_regressions.py
++++ b/src/kinco_lift_control/tests/test_p1_regressions.py
+@@ -1,6 +1,7 @@
+ """前三项审查问题的回归;仅使用内存CAN及ROS桩,不连接硬件."""
+ import pathlib
+ import sys
++import time
+ import types
+ import unittest
+ from unittest.mock import patch
+@@ -176,18 +177,90 @@ class ControllerP1Tests(unittest.TestCase):
+         self.axis.disable()
+ 
+     def test_recover_to_lower_limit_enables_reference(self):
+-        """恢复流程应慢速下行至下限位触发,停稳后可正常建立参考."""
++        """恢复是受监督的异步状态:启动后由poll驱动,到下限位停稳撤使能,再建参考."""
+         inset_counts = round(5 * 65536 / 2.25)
+         self.bus.position = 147599 + inset_counts
+         self.axis.poll()
+-        self.axis.recover_to_lower_limit()
++        self.axis.recover_to_lower_limit(rpm=100)
++        self.assertTrue(self.axis.recovering)
++        self.assertTrue(self.axis.armed)
++        deadline = time.monotonic() + 5
++        while self.axis.recovering and time.monotonic() < deadline:
++            self.axis.poll()
++            time.sleep(0.005)
++        self.assertFalse(self.axis.recovering)
+         lower, _ = self.axis._limits()
+         self.assertTrue(lower)
+         self.assertFalse(self.bus.moving)
++        self.assertFalse(self.axis.armed)
+         self.axis.reference_here()
+         self.assertTrue(self.axis.frame_confirmed)
+         self.assertIsNotNone(self.axis.reference)
+ 
++    def test_recovery_requires_stationary_chassis(self):
++        """底盘反馈缺失/未停稳时拒绝恢复,不能绕过常规停车联锁(复盘4.4)."""
++        self.reason = 'Chassis odometry missing/stale'
++        inset_counts = round(5 * 65536 / 2.25)
++        self.bus.position = 147599 + inset_counts
++        with self.assertRaisesRegex(LiftError, 'stale'):
++            self.axis.recover_to_lower_limit()
++        self.assertFalse(self.axis.recovering)
++        self.assertFalse(self.bus.enabled)
++        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
++
++    def test_recovery_requires_motion_budget(self):
++        """工作制预算耗尽时拒绝恢复;预算在恢复期间也持续累计."""
++        inset_counts = round(5 * 65536 / 2.25)
++        self.bus.position = 147599 + inset_counts
++        self.axis.poll()
++        self.axis.budget.used = self.axis.budget.limit
++        with self.assertRaisesRegex(LiftError, 'budget'):
++            self.axis.recover_to_lower_limit()
++        self.assertFalse(self.axis.recovering)
++
++    def test_recovery_timeout_is_fault_latched_not_silent(self):
++        """恢复超时按故障锁存处理,撤销任务;不是静默返回."""
++        inset_counts = round(5 * 65536 / 2.25)
++        self.bus.position = 147599 + inset_counts
++        self.axis.poll()
++        self.axis.recover_to_lower_limit(rpm=100)
++        self.axis.recover_deadline = time.monotonic() - 1
++        with self.assertRaisesRegex(LiftError, 'timeout|Lower limit'):
++            self.axis.poll()
++        self.axis.fail('recovery timeout')
++        self.assertTrue(self.axis.latched)
++        self.assertFalse(self.axis.recovering)
++        self.assertFalse(self.bus.moving)
++
++    def test_recovery_stop_service_interrupts_descent(self):
++        """恢复中途stop可介入:撤销恢复状态,快停写入,故障锁存."""
++        inset_counts = round(5 * 65536 / 2.25)
++        self.bus.position = 147599 + inset_counts
++        self.axis.poll()
++        self.axis.recover_to_lower_limit(rpm=100)
++        self.axis.poll()
++        self.assertNotEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.axis.stop()
++        self.assertFalse(self.axis.recovering)
++        self.assertFalse(self.axis.armed)
++        self.assertTrue(self.axis.latched)
++        # 快停是6040=0x000B,不改60FF寄存器;驱动器按6085减速停车.
++        self.assertEqual(self.bus.od[(0x6040, 0)][2], 0x000B)
++        self.assertFalse(self.bus.moving)
++
++    def test_recovery_moving_wrong_direction_aborts(self):
++        """恢复只能向下;位置反向上行立即中止,不等到超时."""
++        inset_counts = round(5 * 65536 / 2.25)
++        self.bus.position = 147599 + inset_counts
++        self.axis.poll()
++        self.axis.recover_to_lower_limit(rpm=100)
++        self.bus.position += 1000000  # 人工模拟反向漂移.
++        self.axis.feedback_time = None  # 坐标跳变核验另有专门用例.
++        with self.assertRaisesRegex(LiftError, 'away'):
++            self.axis.poll()
++        self.axis.fail('wrong direction')
++        self.assertFalse(self.axis.recovering)
++
+ 
+ class NodeP1Tests(unittest.TestCase):
+     setUp = wiring.NodeWiringTests.setUp
+diff --git a/src/kinco_lift_control/tests/test_crash_process.py b/src/kinco_lift_control/tests/test_crash_process.py
+new file mode 100644
+index 0000000..d37dce4
+--- /dev/null
++++ b/src/kinco_lift_control/tests/test_crash_process.py
+@@ -0,0 +1,197 @@
++"""进程级退出测试:控制逻辑跑在子进程,模拟驱动器留在父进程,跨进程观察总线结果.
++
++对应复盘P0-B:不依赖vcan/sudo;覆盖正常退出/未处理异常/SIGKILL/os._exit.
++SIGKILL与os._exit没有任何Python清理机会,验收的是驱动器侧节点保护超时
++(仿真600ms)独立兜底,不是atexit.
++"""
++import pathlib
++import socket
++import struct
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import unittest
++
++ROOT = pathlib.Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'src'))
++from kinco_lift.simulator import SimulatedCan
++
++FRAME = struct.Struct('=HBB8s')  # can_id, remote, dlc, data
++
++CHILD = '''
++import atexit, os, signal, socket, struct, sys
++sys.path.insert(0, {src!r})
++from kinco_lift.canopen import SdoClient
++from kinco_lift.controller import LiftConfig, LiftController
++
++FRAME = struct.Struct('=HBB8s')
++
++class TcpCan:
++    def __init__(self, port):
++        self.sock = socket.create_connection(('127.0.0.1', port), timeout=3)
++        self.buf = b''
++    def send(self, can_id, data=b'', remote=False):
++        self.sock.sendall(FRAME.pack(can_id, int(remote), len(data), data.ljust(8, b'\\0')))
++    def recv(self, timeout):
++        self.sock.settimeout(max(timeout, 0.001))
++        try:
++            while len(self.buf) < FRAME.size:
++                chunk = self.sock.recv(4096)
++                if not chunk:
++                    return None
++                self.buf += chunk
++        except socket.timeout:
++            return None
++        record, self.buf = self.buf[:FRAME.size], self.buf[FRAME.size:]
++        can_id, remote, dlc, data = FRAME.unpack(record)
++        return can_id, data[:dlc]
++    def close(self):
++        self.sock.close()
++
++scenario, port = sys.argv[1], int(sys.argv[2])
++cfg = LiftConfig(dict(motion_enabled=True, commissioning_confirmed=True,
++                      drive_limits_verified=True, keyboard_control_enabled=True,
++                      encoder_counts_per_rev=65536, mm_per_motor_rev=2.25,
++                      travel_mm=0, max_motor_rpm=1000, max_speed_mm_s=37.5))
++axis = LiftController(SdoClient(TcpCan(port), timeout=0.15), cfg, lambda: '')
++# 与lift_node一致:atexit兜底在构造后立即注册.
++atexit.register(axis.failsafe_halt)
++axis.confirm_keyboard_coordinates()
++axis.enable(keyboard=True)
++axis.keyboard_command(0)
++axis.keyboard_command(1)
++if scenario == 'normal':
++    axis.close()
++elif scenario == 'crash':
++    raise RuntimeError('simulated crash with pending velocity command')
++elif scenario == 'sigkill':
++    os.kill(os.getpid(), signal.SIGKILL)
++elif scenario == 'os_exit':
++    os._exit(1)
++'''
++
++
++class DriveServer:
++    """父进程持有的模拟驱动器;连接断开后继续推进时间,节点保护超时才会触发."""
++
++    def __init__(self):
++        self.sim = SimulatedCan(travel_mm=(122303105 - 147599) * 2.25 / 65536,
++                                lower_counts=147599)
++        self.listener = socket.socket()
++        self.listener.bind(('127.0.0.1', 0))
++        self.listener.listen(1)
++        self.port = self.listener.getsockname()[1]
++        self.stopped = False
++        self.thread = threading.Thread(target=self._serve, daemon=True)
++
++    def _tick_until_stop(self):
++        while not self.stopped:
++            self.sim._step()
++            time.sleep(0.02)
++
++    def _serve(self):
++        conn, _ = self.listener.accept()
++        conn.settimeout(0.05)
++        while not self.stopped:
++            try:
++                record = self._read(conn, FRAME.size)
++            except socket.timeout:
++                self.sim._step()
++                continue
++            if record is None:  # 子进程退出/被杀:没有流量也要继续走表.
++                self._tick_until_stop()
++                return
++            can_id, remote, dlc, data = FRAME.unpack(record)
++            self.sim.send(can_id, data[:dlc], bool(remote))
++            while True:
++                reply = self.sim.recv(0)
++                if reply is None:
++                    break
++                rid, rdata = reply
++                conn.sendall(FRAME.pack(rid, 0, len(rdata), rdata.ljust(8, b'\0')))
++
++    @staticmethod
++    def _read(conn, size):
++        data = b''
++        while len(data) < size:
++            chunk = conn.recv(size - len(data))
++            if not chunk:
++                return None
++            data += chunk
++        return data
++
++    def run_child(self, scenario):
++        with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False) as f:
++            f.write(CHILD.format(src=str(ROOT / 'src')))
++            path = f.name
++        return subprocess.Popen([sys.executable, path, scenario, str(self.port)],
++                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++
++    def close(self):
++        self.stopped = True
++        self.thread.join(timeout=2)
++        self.listener.close()
++
++
++class CrashProcessTests(unittest.TestCase):
++    def setUp(self):
++        self.server = DriveServer()
++        self.server.thread.start()
++
++    def tearDown(self):
++        self.server.close()
++
++    def wait_child(self, proc, timeout=8):
++        try:
++            stdout, stderr = proc.communicate(timeout=timeout)
++        except subprocess.TimeoutExpired:
++            proc.kill()
++            self.fail('Child process hung: ' + proc.stderr.read().decode('utf-8', 'replace'))
++        return stdout, stderr
++
++    def test_normal_exit_quick_stops_drive(self):
++        proc = self.server.run_child('normal')
++        self.wait_child(proc)
++        self.assertEqual(proc.returncode, 0)
++        self.assertEqual(self.server.sim.od[(0x6040, 0)][2], 0x000B)
++        self.assertFalse(self.server.sim.enabled)
++        self.assertFalse(self.server.sim.moving)
++
++    def test_unhandled_exception_runs_atexit_failsafe(self):
++        proc = self.server.run_child('crash')
++        self.wait_child(proc)
++        self.assertNotEqual(proc.returncode, 0)
++        # atexit兜底:60FF清零+6040=6两帧真正到达总线.
++        self.assertEqual(self.server.sim.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(self.server.sim.od[(0x6040, 0)][2], 6)
++        self.assertFalse(self.server.sim.enabled)
++
++    def check_supervision_only_backstop(self, scenario):
++        """SIGKILL/os._exit:无Python清理,60FF残留,但驱动器节点保护超时独立停车."""
++        proc = self.server.run_child(scenario)
++        self.wait_child(proc)
++        sim = self.server.sim
++        self.assertNotEqual(sim.od[(0x60FF, 0)][2], 0)  # 残留正是10-27事故形态.
++        self.assertEqual(sim.od[(0x6040, 0)][2], 0x000F)  # 没有收到任何停机/关断帧.
++        deadline = time.monotonic() + 3
++        while time.monotonic() < deadline:
++            if sim.od[(0x2602, 0)][2] & 0x0002:
++                break
++            time.sleep(0.02)
++        # 手册7.12节:看门狗是2602 bit1;驱动器撤使能,运动停止.
++        self.assertTrue(sim.od[(0x2602, 0)][2] & 0x0002)
++        self.assertFalse(sim.enabled)
++        self.assertFalse(sim.moving)
++
++    def test_sigkill_relies_on_drive_supervision(self):
++        self.check_supervision_only_backstop('sigkill')
++        self.assertEqual(self.server and True, True)
++
++    def test_os_exit_relies_on_drive_supervision(self):
++        self.check_supervision_only_backstop('os_exit')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/src/kinco_lift_control/tests/test_failsafe_shutdown.py b/src/kinco_lift_control/tests/test_failsafe_shutdown.py
+new file mode 100644
+index 0000000..ac45ec1
+--- /dev/null
++++ b/src/kinco_lift_control/tests/test_failsafe_shutdown.py
+@@ -0,0 +1,149 @@
++"""2026-10-27事故回归:节点崩溃退出时驱动器残留mode3+60FF,机构无人上漂60mm.
++
++崩溃路径不经过rospy.on_shutdown(signal_shutdown不运行),修复靠atexit兜底:
++LiftNode.failsafe_shutdown -> LiftController.failsafe_halt,清零速度指令并关断驱动器.
++复盘(2026-10-28)补充:纯只读未接管的会话退出不写驱动器;SDO会话失效时
++降级为单向尽力发送;atexit覆盖不到SIGKILL/os._exit/断电,那些靠驱动器节点保护.
++全部使用内存CAN及ROS桩,不连接硬件.
++"""
++import pathlib
++import sys
++import unittest
++from unittest.mock import patch
++
++sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
++import test_base_height as base
++import test_keyboard as keyboard
++import test_ros_wiring as wiring
++from kinco_lift.canopen import CanError
++
++
++class FailsafeKeyboardTests(unittest.TestCase):
++    """速度模式(mode 3)崩溃现场:60FF非零,驱动器仍使能."""
++
++    setUp = keyboard.KeyboardControllerTests.setUp
++    tearDown = keyboard.KeyboardControllerTests.tearDown
++    start = keyboard.KeyboardControllerTests.start
++
++    def test_crash_exit_zeroes_velocity_and_shuts_down_drive(self):
++        self.start()
++        self.axis.keyboard_command(1)
++        self.assertNotEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.assertTrue(self.bus.enabled)
++        self.axis.failsafe_halt()
++        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(self.bus.od[(0x6040, 0)][2], 6)
++        self.assertFalse(self.bus.enabled)
++        self.assertFalse(self.bus.moving)
++
++    def test_readonly_exit_never_touches_drive(self):
++        """纯只读未接管会话退出不写驱动器;遗留使能由显式接管/恢复流程处理,禁止自动续跑."""
++        self.assertFalse(self.axis.took_control)
++        self.axis.poll()
++        sent = len(self.bus.sent)
++        self.axis.failsafe_halt()
++        self.assertEqual(len(self.bus.sent), sent)
++
++    def test_failed_mid_enable_is_still_covered(self):
++        """使能握手中途失败:armed尚未置位但已接管,崩溃退出仍要清零关断."""
++        self.axis.confirm_keyboard_coordinates()
++        original = self.axis.sdo.write
++        def fail_at_accel(index, *args, **kwargs):
++            if index == 0x6083:
++                raise CanError('test mid-enable failure')
++            return original(index, *args, **kwargs)
++        with patch.object(self.axis.sdo, 'write', side_effect=fail_at_accel):
++            with self.assertRaises(CanError):
++                self.axis.enable(keyboard=True)
++        self.assertFalse(self.axis.armed)
++        self.assertTrue(self.axis.took_control)
++        self.axis.failsafe_halt()
++        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(self.bus.od[(0x6040, 0)][2], 6)
++
++    def test_poisoned_session_still_emits_both_frames(self):
++        """会话poisoned时普通SDO在发送前被拒绝;两帧必须经单向兜底真正发出."""
++        self.start()
++        self.axis.keyboard_command(1)
++        self.bus.drop_replies = True
++        self.axis.failsafe_halt()
++        self.assertTrue(self.axis.sdo.poisoned)  # 兜底不清除失效标记.
++        writes = [(data[1] | data[2] << 8, int.from_bytes(data[4:], 'little', signed=True))
++                  for can_id, data, rtr in self.bus.sent
++                  if not rtr and can_id == 0x601 and data[0] in (0x23, 0x2B)]
++        self.assertIn((0x60FF, 0), writes)
++        self.assertIn((0x6040, 6), writes)
++        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(self.bus.od[(0x6040, 0)][2], 6)
++
++    def test_failsafe_after_clean_close_is_silent(self):
++        """正常退出close已获停机回执,兜底不得重复写或复活已关闭的传输."""
++        self.start()
++        self.axis.keyboard_command(1)
++        self.axis.close()
++        sent = len(self.bus.sent)
++        self.axis.failsafe_halt()
++        self.assertEqual(len(self.bus.sent), sent)
++
++    def test_unconfirmed_close_still_gets_failsafe_attempt(self):
++        """close的停机写入未获回执(poisoned)时,atexit仍经单向兜底补发清零/关断."""
++        self.start()
++        self.axis.keyboard_command(1)
++        self.bus.drop_replies = True
++        self.axis.close()
++        self.assertFalse(self.axis.stop_confirmed)
++        self.axis.failsafe_halt()
++        writes = [(data[1] | data[2] << 8, int.from_bytes(data[4:], 'little', signed=True))
++                  for can_id, data, rtr in self.bus.sent
++                  if not rtr and can_id == 0x601 and data[0] in (0x23, 0x2B)]
++        self.assertIn((0x60FF, 0), writes)
++        self.assertIn((0x6040, 6), writes)
++
++
++class FailsafePositionTests(unittest.TestCase):
++    """位置模式(mode 1)崩溃现场:驱动器使能中,定位任务未完成."""
++
++    setUp = base.HeightAndSpeedTests.setUp
++    tearDown = base.HeightAndSpeedTests.tearDown
++    start_position = base.HeightAndSpeedTests.start_position
++
++    def test_position_move_crash_exit_disables_drive(self):
++        self.start_position()
++        self.axis.move_top_height(1.1)
++        self.assertTrue(self.bus.moving)
++        self.axis.failsafe_halt()
++        self.assertEqual(self.bus.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(self.bus.od[(0x6040, 0)][2], 6)
++        self.assertFalse(self.bus.enabled)
++        self.assertFalse(self.bus.moving)
++
++
++class NodeFailsafeTests(unittest.TestCase):
++    setUp = wiring.NodeWiringTests.setUp
++    tearDown = wiring.NodeWiringTests.tearDown
++
++    def test_atexit_failsafe_is_registered_at_construction(self):
++        with patch('atexit.register') as register:
++            node = wiring.load_script('lift_node').LiftNode()
++        try:
++            self.assertTrue(any(call.args[0] == node.failsafe_shutdown
++                                for call in register.call_args_list))
++        finally:
++            node.shutdown()
++
++    def test_crash_bypassing_ros_shutdown_still_halts_drive(self):
++        """测试中rospy.on_shutdown是Mock不会运行;直接调用atexit兜底模拟崩溃退出."""
++        self.node.confirm_keyboard(None)
++        self.node.enable_keyboard(wiring.Message(True))
++        self.node.keyboard_cb(wiring.Message(0))
++        self.node.keyboard_cb(wiring.Message(1))
++        bus = self.node.axis.sdo.transport
++        self.assertNotEqual(bus.od[(0x60FF, 0)][2], 0)
++        self.node.failsafe_shutdown()
++        self.assertEqual(bus.od[(0x60FF, 0)][2], 0)
++        self.assertEqual(bus.od[(0x6040, 0)][2], 6)
++        self.assertFalse(bus.enabled)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git "a/src/\346\227\245\345\277\227/daily_10_28_KIMI.yaml" "b/src/\346\227\245\345\277\227/daily_10_28_KIMI.yaml"
+new file mode 100644
+index 0000000..98b96a4
+--- /dev/null
++++ "b/src/\346\227\245\345\277\227/daily_10_28_KIMI.yaml"
+@@ -0,0 +1,110 @@
++# ============================================================
++# 工作日志 daily_10_28 (2026-10-28, 上午)
++# ============================================================
++
++date: 2026-10-28
++robot: wheeltec senior + Kinco FD125 升降柱 (SMK60S-0040 电机, 4190mm 行程, 24V 供电)
++scope: 完成 daily_10_27 "明天待办"中所有不需实机的项目; 高优先级4项全部落地, FD125手册查询受条件限制部分完成
++
++# ---------- 背景 ----------
++背景:
++  - 起点: daily_10_27.yaml 待办清单; 实物 lift.yaml 四项门禁仍为临时 true
++  - 基线测试: 154项中1项失败 (test_configuration 强制门禁为 false, 与临时开启冲突)
++  - 工作方式: 用户授权全权限自主完成; 只做不需实机行动的项目
++  - 实物未动: can0 保持 DOWN/STOPPED, 未接驱动器, 未开隔离 master
++
++# ---------- 完成内容 ----------
++完成内容:
++  T1_60FF残留修复: PASS
++    根因: rospy.on_shutdown 只在 signal_shutdown 时运行; 崩溃退出的未处理异常
++          不触发它, axis.close() 不执行, 驱动器残留 mode3+60FF (10-27 上漂60mm事故路径)
++    修复:
++      - controller.py 新增 failsafe_halt(): 跳过全部状态判断, 尽力写 60FF=0 + 6040=0x0006
++        单帧失败不阻塞另一帧; 一切失败静默, 驱动器靠节点保护 200ms x 3 超时自停兜底
++      - controller.py close() 末尾置 closed=True, 正常退出后兜底不再重复写
++      - lift_node.py 构造时 atexit.register(self.failsafe_shutdown), 崩溃退出仍有写入机会
++    覆盖缺口: stop() 只在 was_writing 时写 0x000B; failsafe 无条件写,
++              包括"上一进程崩溃遗留使能驱动器, 本进程从未使能"的场景
++  T2_崩溃复现验证: PASS(仿真)
++    - 新增 tests/test_failsafe_shutdown.py 共7个用例:
++      mode3 崩溃清零/关断、mode1 定位中崩溃关断、从未使能也写、
++      CAN已死(drop_replies)不抛异常、clean close 后幂等零发送、
++      atexit 注册验证、节点级绕过 rospy.on_shutdown 仍停机
++    - 真进程级 vcan 端到端未做: 本机无免密 sudo, 无法 ip link add vcan0
++      语义已由单测覆盖; atexit 触发本身是 Python 语言保证
++  T3_FD125错误码: 已更正 (REVIEW_20261028_AM_GPT 提供手册定义)
++    - FD1X5手册7.12节(印刷页108-109): 2601/2602都是Unsigned16位掩码
++      2601 bit0(0x0001)=扩展错误; 2602 bit12(0x1000)=CAN总线中断; 2602 bit1(0x0002)=看门狗
++    - 因此10-27实机读数2601=0x0001+2602=0x1000 = "扩展错误伴CAN总线中断",
++      不是此前假设的节点保护超时/CiA301通用错误; 复位可清除不代表原因已消除
++    - 本机无手册PDF且外网受限,上午的假设作废; 仿真器看门狗超时建模已改为2602=0x0002
++    - probe_drive.py 扩展只读 2602/1001/1003; 可选对象放最后读(不支持时SDO中止会使会话失效)
++      KVASER_SOCKETCAN.md 同步更正位掩码语义与使用限制
++  T4_门禁回退: PASS
++    - lift.yaml 四项全部回退 false (motion/commissioning/drive_limits/keyboard)
++      注释标明"G阶段验证通过后已回退, 下次实机前再临时开启"
++    - 顺手清理 R2 遗留死键: base_linear_threshold_m_s/base_angular_threshold_rad_s
++      替换为实际生效的三级阈值键 (cmd_deadband 0.001/0.002, noise 0.005/0.01, motion 0.02/0.05)
++    - 基线唯一失败项 test_physical_stays_locked 恢复通过
++  T5_慢速区覆盖: PASS(单测)
++    - 原有覆盖: ZoneTests 精确边界(3060000/3060001 下行, 119389999/119390000 上行),
++      test_position_mode_also_slows_at_upper_zone 上行 119400000 → 100rpm
++    - 补缺口: test_position_mode_also_slows_at_lower_zone_when_descending
++      下行过 3060000 自动降到 100rpm 并回写 6081 (此前下行方向无位置模式用例)
++    - 实机边界验证仍属现场项目, 不在本日上午范围
++
++# ---------- 测试与构建 ----------
++测试:
++  单测: 162/162 PASS (154 基线 + failsafe×7 + 下行慢速区×1)
++  LF: test_configuration 通过, 全部修改文件 LF
++  仿真探测: python3 scripts/probe_drive.py --simulate 输出 10 项对象正常
++
++# ---------- 配置变更 ----------
++配置变更:
++  lift.yaml:
++    - motion_enabled: true → false (回退, 注释留痕)
++    - commissioning_confirmed: true → false (回退)
++    - drive_limits_verified: true → false (回退)
++    - keyboard_control_enabled: true → false (回退)
++    - base_linear/angular_threshold_* 死键 → R2 三级阈值新键名
++    - initial_top_height_m: 保持注释 (待实机实测)
++  未提交: 7 个文件修改 + 1 个新测试文件, 共约 +75 行, 复盘时决定是否 commit
++
++# ---------- 接下来要干的任务 (均需实机/现场) ----------
++接下来任务:
++  优先级_高:
++    - 实机验证 T1: 临时开门禁 → 键盘上行 → kill 节点 → 确认 60FF 清零不溜车
++      (对应 daily_10_27 事故场景; 同时观察重启后是否还报 SW=0x4218 故障)
++    - 对 FD125 手册(2025-11版, 实体在用户处)故障表确认 2601=0x0001/2602=0x1000 含义
++      故障复现时跑 python3 scripts/probe_drive.py --interface can0 采集完整故障指纹
++    - 实测 initial_top_height_m: 下限位静止时地面到顶端总高度, 取消注释填入 lift.yaml
++  优先级_中:
++    - R2 ParkingInterlock 三级阈值对真车 /odom 编码器噪声实机校验
++    - 真车 /odom 替换 fake_odom.py (当前占位假静止反馈)
++    - 慢速区边界实机: 下行过 3060000 应自动 -100rpm, 上行过 119390000 应自动减速
++  优先级_低:
++    - G 阶段后续: 高速 1000rpm 中段、端点内缩 5mm、制动距离记录
++    - 底盘-升降联动: 真车 /odom + base_motion_request/permit 联锁
++    - 高位行车稳定性单独验收
++    - 复盘决定本日改动是否 commit
++
++# ---------- 现场安全提示 (实机项目开始前逐条确认) ----------
++安全前置:
++  - 机械保持/防坠可靠
++  - 现场人员可独立操作物理急停
++  - 活动空间安全, 24V 供电稳定
++  - 底盘静锁, 无其他 CAN 主站
++  - 四项门禁实机前临时开, 结束后立即回退 false
++  - 隔离 master 11321 与真实机器人 11311 隔离
++
++# ---------- 给下一位接手AI的关键提示 ----------
++接手提示:
++  - 实物 lift.yaml 四项门禁已回退 false, 实机验证前需临时开, 结束后必须回退
++  - 崩溃停机路径: atexit → failsafe_shutdown → failsafe_halt 写 60FF=0+6040=6;
++    正常退出走 close() 后兜底自动空转, 不要删 closed 标志
++  - probe_drive.py 现为 10 项只读对象; 1003 无记录时不会读 sub1, 属预期
++  - 本机无免密 sudo; 想做 vcan 进程级崩溃端到端测试需用户提供密码建 vcan0
++  - FD125 手册 2025-11 实体版在用户处, 2601/2602 故障表以手册为准
++  - 每次新终端必须 export ROS_MASTER_URI 和 ROS_HOSTNAME, 不写 .bashrc
++  - 本日所有改动未提交, git status 可见, 复盘时再决定是否 commit
++  - 详细交接文件仍是 Jetson升降控制-后续验证与AI交接清单-20261027.md

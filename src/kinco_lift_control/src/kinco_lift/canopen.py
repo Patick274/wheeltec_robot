@@ -160,3 +160,16 @@ class SdoClient:
                                 struct.pack('<BHBH2x', 0x2B, 0x6040, 0, 0x000B))
         except (OSError, CanError):
             pass
+
+    def halt_unconfirmed(self):
+        """会话失效后的最后手段:单向尽力发速度清零与关断帧,不等回执.
+
+        故意绕过poisoned检查:普通SDO在会话失效后拒绝发送,但退出兜底仍要尝试.
+        不清除poisoned,不重连;发送成功只代表帧上了总线,不代表驱动器已停稳.
+        """
+        for payload in (struct.pack('<BHBi', 0x23, 0x60FF, 0, 0),
+                        struct.pack('<BHBH2x', 0x2B, 0x6040, 0, 0x0006)):
+            try:
+                self.transport.send(0x600 + self.node_id, payload)
+            except (OSError, CanError):
+                pass

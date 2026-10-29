@@ -1,0 +1,110 @@
+# ============================================================
+# 工作日志 daily_10_28 (2026-10-28, 上午)
+# ============================================================
+
+date: 2026-10-28
+robot: wheeltec senior + Kinco FD125 升降柱 (SMK60S-0040 电机, 4190mm 行程, 24V 供电)
+scope: 完成 daily_10_27 "明天待办"中所有不需实机的项目; 高优先级4项全部落地, FD125手册查询受条件限制部分完成
+
+# ---------- 背景 ----------
+背景:
+  - 起点: daily_10_27.yaml 待办清单; 实物 lift.yaml 四项门禁仍为临时 true
+  - 基线测试: 154项中1项失败 (test_configuration 强制门禁为 false, 与临时开启冲突)
+  - 工作方式: 用户授权全权限自主完成; 只做不需实机行动的项目
+  - 实物未动: can0 保持 DOWN/STOPPED, 未接驱动器, 未开隔离 master
+
+# ---------- 完成内容 ----------
+完成内容:
+  T1_60FF残留修复: PASS
+    根因: rospy.on_shutdown 只在 signal_shutdown 时运行; 崩溃退出的未处理异常
+          不触发它, axis.close() 不执行, 驱动器残留 mode3+60FF (10-27 上漂60mm事故路径)
+    修复:
+      - controller.py 新增 failsafe_halt(): 跳过全部状态判断, 尽力写 60FF=0 + 6040=0x0006
+        单帧失败不阻塞另一帧; 一切失败静默, 驱动器靠节点保护 200ms x 3 超时自停兜底
+      - controller.py close() 末尾置 closed=True, 正常退出后兜底不再重复写
+      - lift_node.py 构造时 atexit.register(self.failsafe_shutdown), 崩溃退出仍有写入机会
+    覆盖缺口: stop() 只在 was_writing 时写 0x000B; failsafe 无条件写,
+              包括"上一进程崩溃遗留使能驱动器, 本进程从未使能"的场景
+  T2_崩溃复现验证: PASS(仿真)
+    - 新增 tests/test_failsafe_shutdown.py 共7个用例:
+      mode3 崩溃清零/关断、mode1 定位中崩溃关断、从未使能也写、
+      CAN已死(drop_replies)不抛异常、clean close 后幂等零发送、
+      atexit 注册验证、节点级绕过 rospy.on_shutdown 仍停机
+    - 真进程级 vcan 端到端未做: 本机无免密 sudo, 无法 ip link add vcan0
+      语义已由单测覆盖; atexit 触发本身是 Python 语言保证
+  T3_FD125错误码: 已更正 (REVIEW_20261028_AM_GPT 提供手册定义)
+    - FD1X5手册7.12节(印刷页108-109): 2601/2602都是Unsigned16位掩码
+      2601 bit0(0x0001)=扩展错误; 2602 bit12(0x1000)=CAN总线中断; 2602 bit1(0x0002)=看门狗
+    - 因此10-27实机读数2601=0x0001+2602=0x1000 = "扩展错误伴CAN总线中断",
+      不是此前假设的节点保护超时/CiA301通用错误; 复位可清除不代表原因已消除
+    - 本机无手册PDF且外网受限,上午的假设作废; 仿真器看门狗超时建模已改为2602=0x0002
+    - probe_drive.py 扩展只读 2602/1001/1003; 可选对象放最后读(不支持时SDO中止会使会话失效)
+      KVASER_SOCKETCAN.md 同步更正位掩码语义与使用限制
+  T4_门禁回退: PASS
+    - lift.yaml 四项全部回退 false (motion/commissioning/drive_limits/keyboard)
+      注释标明"G阶段验证通过后已回退, 下次实机前再临时开启"
+    - 顺手清理 R2 遗留死键: base_linear_threshold_m_s/base_angular_threshold_rad_s
+      替换为实际生效的三级阈值键 (cmd_deadband 0.001/0.002, noise 0.005/0.01, motion 0.02/0.05)
+    - 基线唯一失败项 test_physical_stays_locked 恢复通过
+  T5_慢速区覆盖: PASS(单测)
+    - 原有覆盖: ZoneTests 精确边界(3060000/3060001 下行, 119389999/119390000 上行),
+      test_position_mode_also_slows_at_upper_zone 上行 119400000 → 100rpm
+    - 补缺口: test_position_mode_also_slows_at_lower_zone_when_descending
+      下行过 3060000 自动降到 100rpm 并回写 6081 (此前下行方向无位置模式用例)
+    - 实机边界验证仍属现场项目, 不在本日上午范围
+
+# ---------- 测试与构建 ----------
+测试:
+  单测: 162/162 PASS (154 基线 + failsafe×7 + 下行慢速区×1)
+  LF: test_configuration 通过, 全部修改文件 LF
+  仿真探测: python3 scripts/probe_drive.py --simulate 输出 10 项对象正常
+
+# ---------- 配置变更 ----------
+配置变更:
+  lift.yaml:
+    - motion_enabled: true → false (回退, 注释留痕)
+    - commissioning_confirmed: true → false (回退)
+    - drive_limits_verified: true → false (回退)
+    - keyboard_control_enabled: true → false (回退)
+    - base_linear/angular_threshold_* 死键 → R2 三级阈值新键名
+    - initial_top_height_m: 保持注释 (待实机实测)
+  未提交: 7 个文件修改 + 1 个新测试文件, 共约 +75 行, 复盘时决定是否 commit
+
+# ---------- 接下来要干的任务 (均需实机/现场) ----------
+接下来任务:
+  优先级_高:
+    - 实机验证 T1: 临时开门禁 → 键盘上行 → kill 节点 → 确认 60FF 清零不溜车
+      (对应 daily_10_27 事故场景; 同时观察重启后是否还报 SW=0x4218 故障)
+    - 对 FD125 手册(2025-11版, 实体在用户处)故障表确认 2601=0x0001/2602=0x1000 含义
+      故障复现时跑 python3 scripts/probe_drive.py --interface can0 采集完整故障指纹
+    - 实测 initial_top_height_m: 下限位静止时地面到顶端总高度, 取消注释填入 lift.yaml
+  优先级_中:
+    - R2 ParkingInterlock 三级阈值对真车 /odom 编码器噪声实机校验
+    - 真车 /odom 替换 fake_odom.py (当前占位假静止反馈)
+    - 慢速区边界实机: 下行过 3060000 应自动 -100rpm, 上行过 119390000 应自动减速
+  优先级_低:
+    - G 阶段后续: 高速 1000rpm 中段、端点内缩 5mm、制动距离记录
+    - 底盘-升降联动: 真车 /odom + base_motion_request/permit 联锁
+    - 高位行车稳定性单独验收
+    - 复盘决定本日改动是否 commit
+
+# ---------- 现场安全提示 (实机项目开始前逐条确认) ----------
+安全前置:
+  - 机械保持/防坠可靠
+  - 现场人员可独立操作物理急停
+  - 活动空间安全, 24V 供电稳定
+  - 底盘静锁, 无其他 CAN 主站
+  - 四项门禁实机前临时开, 结束后立即回退 false
+  - 隔离 master 11321 与真实机器人 11311 隔离
+
+# ---------- 给下一位接手AI的关键提示 ----------
+接手提示:
+  - 实物 lift.yaml 四项门禁已回退 false, 实机验证前需临时开, 结束后必须回退
+  - 崩溃停机路径: atexit → failsafe_shutdown → failsafe_halt 写 60FF=0+6040=6;
+    正常退出走 close() 后兜底自动空转, 不要删 closed 标志
+  - probe_drive.py 现为 10 项只读对象; 1003 无记录时不会读 sub1, 属预期
+  - 本机无免密 sudo; 想做 vcan 进程级崩溃端到端测试需用户提供密码建 vcan0
+  - FD125 手册 2025-11 实体版在用户处, 2601/2602 故障表以手册为准
+  - 每次新终端必须 export ROS_MASTER_URI 和 ROS_HOSTNAME, 不写 .bashrc
+  - 本日所有改动未提交, git status 可见, 复盘时再决定是否 commit
+  - 详细交接文件仍是 Jetson升降控制-后续验证与AI交接清单-20261027.md

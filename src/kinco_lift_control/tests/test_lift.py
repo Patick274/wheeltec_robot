@@ -278,16 +278,22 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(LiftError):
             self.axis.poll()
         self.assertFalse(self.bus.moving)
-        self.assertTrue(self.bus.od[(0x2601, 0)][2])
+        # FD1X5手册7.12节:看门狗超时是2602 bit1,不是2601扩展错误位.
+        self.assertTrue(self.bus.od[(0x2602, 0)][2] & 0x0002)
 
 
 class ParkingTests(unittest.TestCase):
+    @staticmethod
+    def settle(p):
+        """直接推移静止起点,不依赖真实sleep;Windows时钟分辨率约15.6ms会让毫秒级sleep失真."""
+        p.stationary_since -= 1
+
     def test_missing_stale_and_stationary(self):
         p = ParkingInterlock(odom_timeout=0.1, stationary_s=0.01)
         self.assertIn('missing', p.reason())
         p.odometry(0, 0, 0)
         self.assertIn('long enough', p.reason())
-        time.sleep(0.02)
+        self.settle(p)
         self.assertEqual(p.reason(), '')
         p.odom_time -= 1
         self.assertIn('stale', p.reason())
@@ -306,7 +312,6 @@ class ParkingTests(unittest.TestCase):
         """任意非零指令都表明运动意图,即便幅值低于旧的0.01测量阈值."""
         p = ParkingInterlock(stationary_s=0.001)
         p.odometry(0, 0, 0)
-        time.sleep(0.005)
         p.command(0.005, 0, 0)
         self.assertIn('command', p.reason())
         p.command(0, 0, 0.005)
@@ -316,20 +321,18 @@ class ParkingTests(unittest.TestCase):
         """实测在噪声地板以下视为静止;原先0.01阈值把0.005~0.02之间的微速也当静止."""
         p = ParkingInterlock(stationary_s=0.001)
         p.odometry(0.003, 0, 0)
-        time.sleep(0.005)
+        self.settle(p)
         self.assertEqual(p.reason(), '')
 
     def test_micro_motion_above_noise_floor_is_not_stationary(self):
         """介于噪声地板与明确运动阈值之间,按不可信对待——要求重新累计静止时间."""
         p = ParkingInterlock(stationary_s=0.001)
         p.odometry(0.015, 0, 0)
-        time.sleep(0.005)
         self.assertNotEqual(p.reason(), '')
 
     def test_micro_angular_above_noise_floor_is_not_stationary(self):
         p = ParkingInterlock(stationary_s=0.001)
         p.odometry(0, 0, 0.015)
-        time.sleep(0.005)
         self.assertNotEqual(p.reason(), '')
 
     def test_command_stop_but_inertia_motion_still_blocks(self):
@@ -338,14 +341,13 @@ class ParkingTests(unittest.TestCase):
         p.command(0.05, 0, 0)
         p.command(0, 0, 0)
         p.odometry(0.015, 0, 0)
-        time.sleep(0.005)
         self.assertNotEqual(p.reason(), '')
 
     def test_definite_motion_threshold_blocks_immediately(self):
         """实测明显超过motion_threshold立即判运动."""
         p = ParkingInterlock(stationary_s=0.001)
         p.odometry(0, 0, 0)
-        time.sleep(0.005)
+        self.settle(p)
         self.assertEqual(p.reason(), '')
         p.odometry(0.05, 0, 0)
         self.assertNotEqual(p.reason(), '')

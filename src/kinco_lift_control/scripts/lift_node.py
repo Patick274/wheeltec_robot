@@ -19,7 +19,7 @@ from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
 from kinco_lift_control.srv import MoveLift, MoveLiftResponse, JogLift, JogLiftResponse
 from kinco_lift_control.srv import MoveTopHeight, MoveTopHeightResponse
 from kinco_lift.canopen import CanError, SdoClient, SocketCan
-from kinco_lift.controller import LiftConfig, LiftController, LiftError
+from kinco_lift.controller import LiftConfig, LiftController, LiftError, LiftReject
 from kinco_lift.interlock import ParkingInterlock
 from kinco_lift.simulator import SimulatedCan
 
@@ -87,6 +87,7 @@ class LiftNode:
             rospy.Service('~stop', Trigger, self.stop),
             rospy.Service('~reset_fault', Trigger, self.reset),
             rospy.Service('~reference_here', Trigger, self.reference),
+            rospy.Service('~reference_from_frame', Trigger, self.reference_from_frame),
             rospy.Service('~recover_to_lower_limit', Trigger, self.recover_to_lower_limit),
             rospy.Service('~move', MoveLift, self.move),
             rospy.Service('~jog', JogLift, self.jog),
@@ -166,13 +167,20 @@ class LiftNode:
                     and (self.allow_moving or not status['enabled']))
 
     def _run(self, operation):
-        """统一串行服务入口;请求失败时返回原因,已使能轴会进入停机锁定."""
+        """统一串行服务入口;请求失败时返回原因,已使能轴会进入停机锁定.
+
+        校验拒绝(LiftReject)只回绝不锁存——什么都没发生,不是故障;
+        驱动器/通信/完整性异常(LiftError等)在接管过驱动器时才fail锁存.
+        """
         with self.action_lock:
             if self.closing:
                 return False, 'Node shutting down.'
             try:
                 operation()
                 return True, 'Accepted. Inspect /lift/status for completion and faults.'
+            except LiftReject as exc:
+                rospy.logwarn('Lift request rejected: %s', exc)
+                return False, str(exc)
             except (CanError, OSError, LiftError, ValueError, OverflowError) as exc:
                 if self.axis.armed or self.axis.guard_active or self.axis.sdo.poisoned:
                     self.axis.fail(str(exc))
@@ -208,6 +216,10 @@ class LiftNode:
     def recover_to_lower_limit(self, req):
         """Trigger:启动受监督的回下限位恢复;回执只代表启动,完成/故障看status."""
         return TriggerResponse(*self._run(self.axis.recover_to_lower_limit))
+
+    def reference_from_frame(self, req):
+        """Trigger:高位受困应急锚点;帧完好核验后参考锚到zones.lower,到家后必须物理对零."""
+        return TriggerResponse(*self._run(self.axis.reference_from_frame))
 
     def move(self, req):
         """MoveLift:height_mm是绝对伸出高度,speed_mm_s是正的线速度."""

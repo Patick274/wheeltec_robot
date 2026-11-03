@@ -15,11 +15,22 @@ class LiftError(RuntimeError):
     pass
 
 
+class LiftReject(LiftError):
+    """请求校验拒绝:什么都没写什么都没动,只回绝;不锁存不撤参考.
+
+    2026-11-02 高位受困事件的根源:_run 把服务拒绝一律 fail(锁存+清参考).
+    纯校验拒绝(未停稳建参考/busy时重复move/未使能要运动/超范围参数)不是故障.
+    驱动器/通信/帧完整性/写入中途的异常仍是 LiftError,照旧锁存;
+    poll 监督路径(run循环)对任何 LiftError 子类都 fail,不受影响.
+    """
+    pass
+
+
 def finite(value, label):
     """拒绝NaN和无穷大,防止异常服务输入进入计数/速度计算."""
     value = float(value)
     if not math.isfinite(value):
-        raise LiftError(label + ' must be finite.')
+        raise LiftReject(label + ' must be finite.')
     return value
 
 
@@ -70,11 +81,11 @@ class LiftConfig:
     def validate_motion(self, require_travel=True):
         """同时确认运动许可,调试完成,驱动器限位和有效机械标定."""
         if not self.motion_enabled or not self.commissioned or not self.limits_verified:
-            raise LiftError('Motion locked: verify commissioning/drive limits and enable motion in YAML.')
+            raise LiftReject('Motion locked: verify commissioning/drive limits and enable motion in YAML.')
         if self.counts <= 0 or self.mm_rev <= 0 or (require_travel and self.travel <= 0):
-            raise LiftError('Confirm encoder_counts_per_rev, mm_per_motor_rev and travel_mm first.')
+            raise LiftReject('Confirm encoder_counts_per_rev, mm_per_motor_rev and travel_mm first.')
         if self.counts != int(self.counts):
-            raise LiftError('encoder_counts_per_rev must be an integer.')
+            raise LiftReject('encoder_counts_per_rev must be an integer.')
 
     def velocity_raw(self, rpm):
         """rpm -> 驱动器内部速度DEC;不能把rpm数值直接写入6081."""
@@ -371,17 +382,17 @@ class LiftController:
         with self.lock:
             self.cfg.validate_motion(require_travel=not keyboard)
             if keyboard and (not self.cfg.keyboard_enabled or not self.keyboard_confirmed):
-                raise LiftError('Keyboard needs enabled configuration and session coordinate confirmation.')
+                raise LiftReject('Keyboard needs enabled configuration and session coordinate confirmation.')
             if self.armed:
-                raise LiftError('Already enabled.')
+                raise LiftReject('Already enabled.')
             if self.stopping:
-                raise LiftError('Stop has not yet been confirmed by feedback.')
+                raise LiftReject('Stop has not yet been confirmed by feedback.')
             if self.latched or self.sdo.poisoned:
-                raise LiftError('Stop/fault latch active; inspect cause and explicitly reset.')
+                raise LiftReject('Stop/fault latch active; inspect cause and explicitly reset.')
             self._check_interlock()
             self.poll()
             if self.budget.remaining <= 0:
-                raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
+                raise LiftReject('Motion duty budget exhausted; full stationary cooldown required.')
             self.took_control = True
             self._enable_drive(3 if keyboard else 1)
             self.armed = True
@@ -400,10 +411,48 @@ class LiftController:
             self.cfg.validate_motion()
             self._check_interlock()
             if self.busy or self.stopping or self.latched:
-                raise LiftError('Reference requires a stationary, non-faulted axis.')
+                raise LiftReject('Reference requires a stationary, non-faulted axis.')
             self.poll()
             self._record_checked_reference()
             self.target_mm = None
+
+    def reference_from_frame(self):
+        """应急回家锚点:帧物理完好但会话参考被fault清除时,用已标定坐标系重建参考.
+
+        2026-11-02 实机暴露的设计空白:fail()清除 reference/frame_confirmed 后,
+        机构停在高位时所有绝对运动被锁, reference_here 又要求下限位开关闭合,
+        恢复流程单次限距约18mm, 4米高位实际无法回家.
+        与 reference_here 的区别: 那里用下限位开关做物理地标校验; 这里信任
+        已标定帧(zones)+编码器绝对位置+精度核验, 把参考直接锚到 zones.lower.
+        只允许在行程中段(两限位都不触发, 不靠近端点)且静止时使用;
+        不解除键盘确认; 到家后必须在下限位用 reference_here 重新物理对零.
+        """
+        with self.lock:
+            self.cfg.validate_motion()
+            if not self.cfg.zones:
+                raise LiftReject('Frame re-anchor requires configured raw zones.')
+            if self.frame_confirmed:
+                raise LiftReject('Frame already confirmed; use reference_here at the lower limit.')
+            if self.armed or self.busy or self.stopping or self.latched:
+                raise LiftReject('Re-anchor requires a disabled, idle, non-faulted axis.')
+            self._check_interlock()
+            self.poll()
+            if self.sdo.read(0x6410, sub=3) != self.cfg.counts:
+                raise LiftError('Drive feedback precision differs from configured counts per revolution.')
+            if abs(self.velocity) > self.cfg.velocity_raw(1):
+                raise LiftReject('Axis must be stationary before re-anchoring.')
+            lower, upper = self._limits()
+            if lower or upper:
+                raise LiftReject('At a travel limit; use reference_here (lower) or inspect (upper).')
+            tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
+            if not (self.cfg.zones.lower + tolerance <= self.position
+                    <= self.cfg.zones.upper - tolerance):
+                raise LiftReject('Position outside commissioned raw frame; cannot re-anchor.')
+            self.reference = self.cfg.zones.lower
+            self.frame_confirmed = True
+            self.target_mm = None
+            self.last_error = ('Reference re-anchored from commissioned frame; '
+                               'physically re-sync with reference_here at the lower limit.')
 
     def recover_to_lower_limit(self, rpm=50, timeout_s=10):
         """启动受监督的回下限位恢复:未使能/空闲/无故障时慢速下行至下限位触发.
@@ -418,23 +467,23 @@ class LiftController:
         with self.lock:
             self.cfg.validate_motion(require_travel=False)
             if self.armed or self.busy or self.stopping or self.latched or self.recovering:
-                raise LiftError('Recovery requires a disabled, idle, non-faulted axis.')
+                raise LiftReject('Recovery requires a disabled, idle, non-faulted axis.')
             if not self.cfg.zones:
-                raise LiftError('Recovery requires configured raw zones.')
+                raise LiftReject('Recovery requires configured raw zones.')
             if not 1 <= rpm <= 100:
-                raise LiftError('Recovery speed must be within 1..100 rpm.')
+                raise LiftReject('Recovery speed must be within 1..100 rpm.')
             self._check_interlock()
             self.poll()
             if self.budget.remaining <= 0:
-                raise LiftError('Motion duty budget exhausted; full stationary cooldown required.')
+                raise LiftReject('Motion duty budget exhausted; full stationary cooldown required.')
             lower, upper = self._limits()
             if lower:
-                raise LiftError('Lower limit already active; call reference_here directly.')
+                raise LiftReject('Lower limit already active; call reference_here directly.')
             if upper:
-                raise LiftError('Upper limit active; manual inspection required.')
+                raise LiftReject('Upper limit active; manual inspection required.')
             tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
             if self.position <= self.cfg.zones.lower + tolerance:
-                raise LiftError('Position already at/below lower reference; check wiring/sensor.')
+                raise LiftReject('Position already at/below lower reference; check wiring/sensor.')
             self.took_control = True
             self._enable_drive(3)
             down_raw = self.cfg.velocity_raw(rpm)
@@ -485,11 +534,11 @@ class LiftController:
         self.frame_confirmed = self.keyboard_confirmed = False
         lower, upper = self._limits()
         if not lower or upper:
-            raise LiftError('Reference requires the real lower limit only.')
+            raise LiftReject('Reference requires the real lower limit only.')
         if self.sdo.read(0x6410, sub=3) != self.cfg.counts:
             raise LiftError('Drive feedback precision differs from configured counts per revolution.')
         if abs(self.velocity) > self.cfg.velocity_raw(1):
-            raise LiftError('Axis must be stationary before confirming coordinates.')
+            raise LiftReject('Axis must be stationary before confirming coordinates.')
         if self.cfg.zones:
             tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
             if abs(self.position - self.cfg.zones.lower) > tolerance:
@@ -502,54 +551,54 @@ class LiftController:
         with self.lock:
             self.cfg.validate_motion()
             if self.cfg.zones and not self.frame_confirmed:
-                raise LiftError('Confirm the lower raw-coordinate frame before any position move or jog.')
+                raise LiftReject('Confirm the lower raw-coordinate frame before any position move or jog.')
             if self.control_mode != 1:
-                raise LiftError('Position services require position mode; stop and explicitly re-enable first.')
+                raise LiftReject('Position services require position mode; stop and explicitly re-enable first.')
             if not self.armed or self.latched or self.busy or self.stopping:
-                raise LiftError('Axis must be enabled, idle and free of stop/fault latches.')
+                raise LiftReject('Axis must be enabled, idle and free of stop/fault latches.')
             self._check_interlock()
             self.poll()
             value, speed = finite(value_mm, 'distance/height'), finite(speed_mm_s, 'speed')
             if not 0 < speed <= self.cfg.max_speed:
-                raise LiftError('Speed outside configured range.')
+                raise LiftReject('Speed outside configured range.')
             if jog:
                 # 未记录零点也可做受限调试点动,此时只能依赖已验证的硬件限位.
                 if not 0 < abs(value) <= self.cfg.jog_max:
-                    raise LiftError('Jog exceeds max_jog_mm or is zero.')
+                    raise LiftReject('Jog exceeds max_jog_mm or is zero.')
                 delta_mm = value
                 target = self.position + round(value * self.cfg.counts / self.cfg.mm_rev) * self.cfg.direction
             else:
                 # 绝对高度必须有有效会话零点,换算结果仍是电机原始inc.
                 if self.reference is None:
-                    raise LiftError('No lower reference. Call reference_here at lower limit first.')
+                    raise LiftReject('No lower reference. Call reference_here at lower limit first.')
                 if not 0 <= value <= self.cfg.travel:
-                    raise LiftError('Height outside configured travel.')
+                    raise LiftReject('Height outside configured travel.')
                 delta_mm = value - self._height(self.position)
                 target = self.reference + round(value * self.cfg.counts / self.cfg.mm_rev) * self.cfg.direction
             if not -0x80000000 <= target <= 0x7FFFFFFF:
                 raise LiftError('Target overflows int32. Never wrap encoder counts.')
             if target == self.position:
-                raise LiftError('Move rounds to zero encoder counts.')
+                raise LiftReject('Move rounds to zero encoder counts.')
             if self.cfg.zones:
                 zones = self.cfg.zones
                 frame_tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
                 if not zones.lower - frame_tolerance <= self.position <= zones.upper + frame_tolerance:
                     raise LiftError('Position outside configured raw-coordinate frame.')
                 if not min(self.position, zones.lower_stop) <= target <= max(self.position, zones.upper_stop):
-                    raise LiftError('Position target crosses inset normal endpoints.')
+                    raise LiftReject('Position target crosses inset normal endpoints.')
             target_height = self._height(target)
             if target_height is not None and not 0 <= target_height <= self.cfg.travel:
-                raise LiftError('Target crosses software travel boundary.')
+                raise LiftReject('Target crosses software travel boundary.')
             lower, upper = self._limits()
             if (delta_mm < 0 and lower) or (delta_mm > 0 and upper):
-                raise LiftError('Requested direction blocked by active limit.')
+                raise LiftReject('Requested direction blocked by active limit.')
             rpm = speed * 60 / self.cfg.mm_rev  # mm/s -> 电机rpm.
             if rpm > self.cfg.max_rpm:
-                raise LiftError('Requested speed exceeds max_motor_rpm.')
+                raise LiftReject('Requested speed exceeds max_motor_rpm.')
             rpm = self._profile_rpm(rpm, delta_mm)
             effective_speed = rpm * self.cfg.mm_rev / 60
             if abs(delta_mm) / effective_speed + 2 > min(self.cfg.timeout, self.budget.remaining):
-                raise LiftError('Move exceeds timeout; use smaller steps or verify timeout.')
+                raise LiftReject('Move exceeds timeout; use smaller steps or verify timeout.')
             # 绝对定位握手:先2F清激活位并等bit12清零,再写速度/目标,
             # 最后3F产生bit4上升沿,等bit12确认接收.此回执不是到位信号.
             # 暂停后保持bit8清bit4,装入新目标,最后3F才解除暂停,不能恢复旧任务.
@@ -574,17 +623,17 @@ class LiftController:
         """目标是顶端总高度(米),不是本次增量,也不是直接编码器坐标."""
         with self.lock:
             if self.cfg.initial_top_height is None:
-                raise LiftError('Measure and fill initial_top_height_m before requesting top height.')
+                raise LiftReject('Measure and fill initial_top_height_m before requesting top height.')
             height = finite(height_m, 'target top height')
             extension_mm = finite((height - self.cfg.initial_top_height) * 1000, 'extension')
             if extension_mm < 0:
-                raise LiftError('Target top height is below initial_top_height_m.')
+                raise LiftReject('Target top height is below initial_top_height_m.')
             if self.reference is None:
-                raise LiftError('No lower reference; establish stationary lower-limit session reference first.')
+                raise LiftReject('No lower reference; establish stationary lower-limit session reference first.')
             if self.cfg.zones:
                 raw_target = self.reference + round(extension_mm * self.cfg.counts / self.cfg.mm_rev) * self.cfg.direction
                 if not self.cfg.zones.lower_stop <= raw_target <= self.cfg.zones.upper_stop:
-                    raise LiftError('Top-height target is outside inset normal travel.')
+                    raise LiftReject('Top-height target is outside inset normal travel.')
             self.move(extension_mm, self.cfg.max_rpm * self.cfg.mm_rev / 60)
 
     def confirm_keyboard_coordinates(self):
@@ -594,9 +643,9 @@ class LiftController:
         """
         with self.lock:
             if not self.cfg.zones:
-                raise LiftError('Keyboard configuration is disabled.')
+                raise LiftReject('Keyboard configuration is disabled.')
             if self.armed or self.busy or self.stopping or self.latched:
-                raise LiftError('Confirm coordinates before enabling, while stationary and unlatched.')
+                raise LiftReject('Confirm coordinates before enabling, while stationary and unlatched.')
             self._check_interlock()
             self.poll()
             self._record_checked_reference()
@@ -646,7 +695,7 @@ class LiftController:
         """方向心跳(-1/0/+1),无队列,无自动使能,换向先停稳并松键."""
         with self.lock:
             if isinstance(direction, bool) or direction not in (-1, 0, 1):
-                raise LiftError('Keyboard direction must be -1, 0 or +1.')
+                raise LiftError('Keyboard direction must be -1, 0 or +1.')  # 话题通道异常值,按外部异常锁存.
             if direction == 0:
                 if self.armed and self.control_mode == 3:
                     self.poll()
@@ -655,9 +704,9 @@ class LiftController:
                 return
             self.cfg.validate_motion(require_travel=False)
             if not self.cfg.keyboard_enabled or not self.keyboard_confirmed:
-                raise LiftError('Keyboard configuration/session is not confirmed.')
+                raise LiftReject('Keyboard configuration/session is not confirmed.')
             if not self.armed or self.control_mode != 3 or self.latched or self.stopping:
-                raise LiftError('Explicitly enable keyboard mode first.')
+                raise LiftReject('Explicitly enable keyboard mode first.')
             self.poll()
             if self.neutral_required:
                 return  # 长按到限位后不会因为传感器抖动而恢复运动.
@@ -734,7 +783,7 @@ class LiftController:
         with self.lock:
             self.poll()
             if self.busy or self.stopping:
-                raise LiftError('Stop first, then confirm stationary before disabling.')
+                raise LiftReject('Stop first, then confirm stationary before disabling.')
             if self.armed or self.guard_active:
                 self._write(0x6040, 0x0006)
                 self._wait_word(lambda w: not w & 4)
@@ -753,7 +802,7 @@ class LiftController:
                 if not self.word & 4 and abs(self.velocity) <= self.cfg.velocity_raw(1):
                     self.stopping = False
             if self.armed or self.busy or self.stopping:
-                raise LiftError('Disable axis before resetting.')
+                raise LiftReject('Disable axis before resetting.')
             self._write(0x6040, 0x0086)
             self._write(0x6040, 0x0006)
             self.sdo.emcy = 0

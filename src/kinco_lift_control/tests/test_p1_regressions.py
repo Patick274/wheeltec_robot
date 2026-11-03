@@ -277,6 +277,99 @@ class ControllerP1Tests(unittest.TestCase):
         self.assertTrue(self.axis.recovering)
         self.assertNotEqual(self.bus.od[(0x60FF, 0)][2], 0)
 
+    def test_reference_from_frame_reanchors_mid_travel(self):
+        """高位受困回家(2026-11-02实机暴露):帧完好但参考被fault清除时,
+        允许在行程中段静止处把参考锚回zones.lower,随后绝对运动可用."""
+        self.bus.position = 50000000
+        self.axis.poll()
+        self.axis.reference_from_frame()
+        self.assertEqual(self.axis.reference, self.cfg.zones.lower)
+        self.assertTrue(self.axis.frame_confirmed)
+        self.assertFalse(self.axis.keyboard_confirmed)  # 不解除键盘确认.
+        self.axis.enable()
+        self.axis.move(1700, 37.5)  # 当前约1711mm高,小步快走验证绝对运动恢复.
+        self.assertTrue(self.axis.busy)
+
+    def test_reference_from_frame_rejections(self):
+        # 未配置速度区.
+        self.axis.cfg.zones = None
+        with self.assertRaisesRegex(LiftError, 'zones'):
+            self.axis.reference_from_frame()
+        # 恢复zones(直接重建配置).
+        from kinco_lift.controller import LiftConfig
+        self.axis.cfg = LiftConfig(self.params)
+        # 帧已确认时应用reference_here.
+        self.axis.confirm_keyboard_coordinates()
+        with self.assertRaisesRegex(LiftError, 'already confirmed'):
+            self.axis.reference_from_frame()
+        self.axis.fail('test')
+        with self.assertRaisesRegex(LiftError, 'non-faulted'):
+            self.axis.reference_from_frame()
+
+    def test_reference_from_frame_rejects_limits_edges_and_motion(self):
+        # 下限位触发时应用 reference_here.
+        self.axis.poll()
+        with self.assertRaisesRegex(LiftError, 'travel limit'):
+            self.axis.reference_from_frame()
+        # 上限位触发.
+        self.bus.position = 147599 + self.bus.maximum
+        with self.assertRaisesRegex(LiftError, 'travel limit'):
+            self.axis.reference_from_frame()
+        # 帧外(贴近下限容差内侧之外).
+        self.bus.position = self.cfg.zones.lower
+        self.axis.poll()
+        # 编码器精度不匹配.
+        self.bus.position = 50000000
+        self.bus.od[(0x6410, 3)][2] = 131072
+        with self.assertRaisesRegex(LiftError, 'precision'):
+            self.axis.reference_from_frame()
+        self.bus.od[(0x6410, 3)][2] = 65536
+        # 运动中拒绝.
+        original = self.axis.sdo.read
+        def read(index, *args, **kwargs):
+            return self.cfg.velocity_raw(50) if index == 0x606C else original(index, *args, **kwargs)
+        with patch.object(self.axis.sdo, 'read', side_effect=read):
+            with self.assertRaisesRegex(LiftError, 'stationary'):
+                self.axis.reference_from_frame()
+
+    def test_validation_rejections_do_not_latch_or_clear_reference(self):
+        """校验类拒绝只拒绝不锁存不清参考;回归2026-11-02高位受困事件的连锁锁存."""
+        self.start_position()
+        self.axis.move(100, 10)
+        # busy时重复move → 拒绝, 参考保留, 运动继续.
+        with self.assertRaisesRegex(LiftError, 'idle'):
+            self.axis.move(200, 10)
+        self.assertFalse(self.axis.latched)
+        self.assertIsNotNone(self.axis.reference)
+        self.assertTrue(self.axis.busy)
+        self.assertAlmostEqual(self.axis.target_mm, 100, places=3)
+        # 运动中建参考 → 拒绝, 不锁存.
+        with self.assertRaisesRegex(LiftError, 'stationary'):
+            self.axis.reference_here()
+        self.assertFalse(self.axis.latched)
+        # 已使能再enable → 拒绝, 不锁存.
+        with self.assertRaisesRegex(LiftError, 'Already enabled'):
+            self.axis.enable()
+        self.assertTrue(self.axis.armed)
+        self.assertFalse(self.axis.latched)
+        # busy时disable → 拒绝, 不锁存, 运动继续.
+        with self.assertRaisesRegex(LiftError, 'Stop first'):
+            self.axis.disable()
+        self.assertTrue(self.axis.busy)
+        self.assertFalse(self.axis.latched)
+
+    def test_real_fault_still_latches_after_validation_rejection(self):
+        """反向核验:校验拒绝放宽后,真实驱动器故障仍锁存."""
+        self.start_position()
+        with self.assertRaisesRegex(LiftError, 'Already enabled'):
+            self.axis.enable()
+        self.bus.od[(0x6041, 0)][2] |= 8  # 驱动器故障位.
+        with self.assertRaisesRegex(LiftError, 'fault'):
+            self.axis.poll()
+        self.axis.fail('drive fault')
+        self.assertTrue(self.axis.latched)
+        self.assertIsNone(self.axis.reference)
+
 
 class NodeP1Tests(unittest.TestCase):
     setUp = wiring.NodeWiringTests.setUp

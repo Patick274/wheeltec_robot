@@ -5,8 +5,8 @@ node_id: 1
 sdo_timeout_s: 0.15
 poll_hz: 10.0
 
-motion_enabled: false  # 备份提交安全默认;实机时临时开启.
-commissioning_confirmed: false  # 同上.
+motion_enabled: false  # 2026-11-03 拒绝语义验证完毕,回退.
+commissioning_confirmed: false
 # 需实测两个方向的硬件限位,驱动器输入功能和极性.
 # 2026-10-26用户已反馈双向硬限位有效;2026-10-27 G阶段与10-28/11-02 P2低速段已验证,联动验收前保持false.
 # 2026-11-02 上端速度区验收临时开启;结束后必须回退false.
@@ -35,7 +35,7 @@ motion_timeout_s: 110.0
 position_tolerance_mm: 0.2
 
 # 独立开关:写好配置不等于允许实机运行;仍需上方三项许可和每会话c确认.
-keyboard_control_enabled: false  # 备份提交安全默认;实机时临时开启.
+keyboard_control_enabled: false
 speed_zones_enabled: true
 keyboard_cruise_rpm: 1000.0
 keyboard_approach_rpm: 100.0

@@ -82,6 +82,7 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIn('~confirm_keyboard_coordinates', names)
         self.assertIn('~keyboard_stop', names)
         self.assertIn('~recover_to_lower_limit', names)
+        self.assertIn('~reference_from_frame', names)
         topics = [call.args[0] for call in self.ros.Subscriber.call_args_list]
         self.assertIn('~keyboard_command', topics)
 
@@ -177,6 +178,17 @@ class NodeWiringTests(unittest.TestCase):
         self.node.keyboard_cb(Message(2))
         self.assertTrue(self.node.axis.latched)
         self.assertFalse(self.node.axis.armed)
+
+    def test_service_validation_rejection_does_not_latch(self):
+        """重复使能是纯校验拒绝:返回False但不锁存不清参考;回归2026-11-02连锁锁存."""
+        self.node.confirm_keyboard(None)
+        self.node.enable_keyboard(Message(True))
+        reply = self.node.enable_keyboard(Message(True))
+        self.assertFalse(reply.success)
+        self.assertIn('Already enabled', reply.message)
+        self.assertFalse(self.node.axis.latched)
+        self.assertTrue(self.node.axis.armed)
+        self.assertTrue(self.node.axis.frame_confirmed)
 
 
 class KeyboardClientTests(unittest.TestCase):

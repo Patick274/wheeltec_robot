@@ -105,9 +105,9 @@ class FailsafeKeyboardTests(unittest.TestCase):
         self.axis.keyboard_command(1)
         self.axis.close()
         self.assertEqual(self.bus.od[(0x100C, 0)][2], 0)
-        self.bus.last_guard -= 10  # 干净退出后经过再久也不应触发看门狗故障.
+        self.bus.last_guard -= 10  # 干净退出后经过再久也不应触发CAN中断故障.
         self.bus._step()
-        self.assertFalse(self.bus.od[(0x2602, 0)][2] & 0x0002)
+        self.assertFalse(self.bus.od[(0x2602, 0)][2] & 0x1000)
 
 
 class FailsafePositionTests(unittest.TestCase):

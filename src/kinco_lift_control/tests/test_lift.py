@@ -82,6 +82,19 @@ class ProtocolTests(unittest.TestCase):
         self.sdo.read(0x6041, size=2)
         self.assertNotEqual(first, self.sdo.guard_toggle)
 
+    def test_rearm_guard_with_stale_timer_faults_only_when_6007_armed(self):
+        """实机2026-10-28 candump证据:上一会话遗留陈旧guard计时,100C重武装时立即报
+        CAN总线中断(2602 bit12);6007=0(不处理)时同条件不报警."""
+        self.bus.last_guard = time.monotonic() - 100
+        self.bus.od[(0x100D, 0)][2] = 3
+        self.sdo.write(0x6007, 0, size=2, signed=True)
+        self.sdo.write(0x100C, 200, size=2)
+        self.assertFalse(self.bus.od[(0x2602, 0)][2] & 0x1000)
+        self.bus.od[(0x100C, 0)][2] = 0
+        self.sdo.write(0x6007, 1, size=2, signed=True)
+        self.sdo.write(0x100C, 200, size=2)
+        self.assertTrue(self.bus.od[(0x2602, 0)][2] & 0x1000)
+
     def test_manual_scaling_examples(self):
         cfg = calibrated()
         self.assertEqual(cfg.velocity_raw(200), 0x00369D03)
@@ -278,8 +291,9 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(LiftError):
             self.axis.poll()
         self.assertFalse(self.bus.moving)
-        # FD1X5手册7.12节:看门狗超时是2602 bit1,不是2601扩展错误位.
-        self.assertTrue(self.bus.od[(0x2602, 0)][2] & 0x0002)
+        # FD1X5手册表10-2:节点保护超时是2602 bit12(CAN总线中断0x8100);
+        # bit1是固件内部软件看门狗0x6010,与CAN监督无关.
+        self.assertTrue(self.bus.od[(0x2602, 0)][2] & 0x1000)
 
 
 class ParkingTests(unittest.TestCase):

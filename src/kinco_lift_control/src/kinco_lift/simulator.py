@@ -58,8 +58,10 @@ class SimulatedCan:
     def _step(self):
         """按墙钟推进位置,并模拟节点保护超时;没有真实机械动力学.
 
-        超时故障按FD1X5手册7.12节建模:2602 bit1(0x0002)是看门狗位;
-        2601 bit0 是扩展错误位,不用于表示看门狗超时.
+        超时故障按FD1X5手册表10-2建模:2602 bit12(0x1000)是CAN总线中断
+        (节点保护超时+6007=1时报);2602 bit1(0x0002)是固件内部软件看门狗0x6010,
+        与CAN监督无关.计时器从上次RTR起持续累计,重新武装100C时若已超时立即报错
+        (2026-10-28 candump 实机证据).
         """
         now = time.monotonic()
         dt, self.last_time = now - self.last_time, now
@@ -68,7 +70,7 @@ class SimulatedCan:
             if timeout > 0 and now - self.last_guard > timeout:  # 100C=0按CiA301是关闭监督.
                 self.moving = self.enabled = False
                 self.od[(0x6041, 0)][2] = 0x38
-                self.od[(0x2602, 0)][2] |= 0x0002
+                self.od[(0x2602, 0)][2] |= 0x1000
         speed_raw = self.od[(0x6081, 0)][2]
         counts_s = speed_raw * 1875 / 512 / 60
         velocity = 0
@@ -159,6 +161,13 @@ class SimulatedCan:
                     self.od[key][2] = new
                     if index == 0x6040:
                         self._control(new, value)
+                    elif index == 0x100C and new > 0 and self.last_guard is not None:
+                        # 实机行为:重新武装时计时器不重置,已超时则立即报错.
+                        limit = new * self.od[(0x100D, 0)][2] / 1000.0
+                        if self.od[(0x6007, 0)][2] == 1 and time.monotonic() - self.last_guard > limit:
+                            self.moving = self.enabled = False
+                            self.od[(0x6041, 0)][2] = 0x38
+                            self.od[(0x2602, 0)][2] |= 0x1000
                     reply = struct.pack('<BHB4x', 0x60, index, sub)
                 else:
                     reply = struct.pack('<BHBI', 0x80, index, sub, 0x06070010)

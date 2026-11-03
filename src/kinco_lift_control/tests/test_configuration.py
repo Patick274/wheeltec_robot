@@ -69,8 +69,9 @@ class ConfigurationTests(unittest.TestCase):
         params.update(flat_config(ROOT / 'config/simulation.yaml'))
         cfg = LiftConfig(params)
         self.assertTrue(cfg.keyboard_enabled)
-        self.assertEqual(cfg.zones.down_switch, 3060000)
-        self.assertEqual(cfg.zones.up_switch, 119390000)
+        # 2026-11-02 编码器多圈复位后重新标定的实测坐标系;改动须为故意的重新标定行为.
+        self.assertEqual(cfg.zones.down_switch, 2465161)
+        self.assertEqual(cfg.zones.up_switch, 118795161)
         launch = ET.parse(ROOT / 'launch/lift.launch').getroot()
         self.assertEqual(launch.find('arg[@name="simulate"]').attrib['default'], 'false')
         self.assertEqual(ET.parse(ROOT / 'package.xml').findtext('name'), 'kinco_lift_control')

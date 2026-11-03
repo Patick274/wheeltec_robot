@@ -5,12 +5,12 @@ node_id: 1
 sdo_timeout_s: 0.15
 poll_hz: 10.0
 
-motion_enabled: true  # 2026-10-28 P2现场验收临时开启;结束后必须回退false.
-commissioning_confirmed: true  # 同上,临时.
+motion_enabled: false  # 备份提交安全默认;实机时临时开启.
+commissioning_confirmed: false  # 同上.
 # 需实测两个方向的硬件限位,驱动器输入功能和极性.
-# 2026-10-26用户已反馈双向硬限位有效;2026-10-27 G阶段最小运动已验证,联动验收前保持false.
-# 2026-10-28 P2现场验收临时开启;结束后必须回退false.
-drive_limits_verified: true
+# 2026-10-26用户已反馈双向硬限位有效;2026-10-27 G阶段与10-28/11-02 P2低速段已验证,联动验收前保持false.
+# 2026-11-02 上端速度区验收临时开启;结束后必须回退false.
+drive_limits_verified: false
 
 # Windows实际参数已读到65536 inc/电机转;Jetson首次接入仍需回读核对.
 encoder_counts_per_rev: 65536
@@ -35,23 +35,29 @@ motion_timeout_s: 110.0
 position_tolerance_mm: 0.2
 
 # 独立开关:写好配置不等于允许实机运行;仍需上方三项许可和每会话c确认.
-keyboard_control_enabled: false  # 2026-10-27 G阶段实机验证通过后已回退;下次实机前再临时开启.
+keyboard_control_enabled: false  # 备份提交安全默认;实机时临时开启.
 speed_zones_enabled: true
 keyboard_cruise_rpm: 1000.0
 keyboard_approach_rpm: 100.0
 # 当前原始坐标系,不能在重新回原/清编码器后继续沿用.
-keyboard_lower_position_counts: 147599
-keyboard_upper_position_counts: 122303105
-keyboard_down_slow_counts: 3060000
-keyboard_up_slow_counts: 119390000
+# 2026-11-02 编码器多圈数据丢失复位(2690=10)后重新标定:
+# lower=-447240 = 下限位开关闭合静止读数(弹簧回弹后稳定值); 行程跨度不变(编码器圈数性质),
+# upper/两个减速键按旧坐标系相对偏移平移; 上端限位开关位置须在下一次上行时复核.
+keyboard_lower_position_counts: -447240
+keyboard_upper_position_counts: 121708266
+keyboard_down_slow_counts: 2465161
+keyboard_up_slow_counts: 118795161
 # 正常终点暂向行程内部缩5mm,硬限位作为后备;此余量仍须实机验收.
 keyboard_stop_margin_mm: 5.0
 keyboard_reference_tolerance_mm: 1.0
 keyboard_command_timeout_s: 0.4
 # 2分钟运行/18分钟停止的保守辅助限制:进程累计110秒后停机,静止18分钟恢复.
 # 短暂停顿/松键/复位不清预算.进程重启不证明冷却完成,仍需现场履行工作制.
+# 2026-11-02 用户决定冷却 1080s→300s: 依据手册, FD1X5 无电机温度传感器,
+# 真正热兜底是驱动器 IIt 过载保护(2601 bit11 / 0x2350); 本决定风险由现场承担.
+# 试验期间监控 2601 bit11; 若报 IIt 过载, 立即停止并恢复原冷却时长.
 motion_budget_s: 110.0
-motion_cooldown_s: 1080.0
+motion_cooldown_s: 300.0
 
 # 实物必须保留反馈健康检查;非零底盘命令/实测运动时限速100rpm.
 require_base_feedback: true

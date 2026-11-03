@@ -177,11 +177,11 @@ class CrashProcessTests(unittest.TestCase):
         self.assertEqual(sim.od[(0x6040, 0)][2], 0x000F)  # 没有收到任何停机/关断帧.
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if sim.od[(0x2602, 0)][2] & 0x0002:
+            if sim.od[(0x2602, 0)][2] & 0x1000:
                 break
             time.sleep(0.02)
-        # 手册7.12节:看门狗是2602 bit1;驱动器撤使能,运动停止.
-        self.assertTrue(sim.od[(0x2602, 0)][2] & 0x0002)
+        # 手册表10-2:节点保护超时是2602 bit12(CAN总线中断0x8100);驱动器撤使能,运动停止.
+        self.assertTrue(sim.od[(0x2602, 0)][2] & 0x1000)
         self.assertFalse(sim.enabled)
         self.assertFalse(sim.moving)
 

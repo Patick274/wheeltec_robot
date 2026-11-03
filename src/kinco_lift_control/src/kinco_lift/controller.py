@@ -340,18 +340,22 @@ class LiftController:
         self._verified_write(0x6084, self.cfg.acceleration_raw(self.cfg.accel), size=4)
         self._verified_write(0x6085, self.cfg.acceleration_raw(self.cfg.quick_decel), size=4)
         # 节点保护与heartbeat互斥;200ms*3是驱动器侧监督超时设置.
+        # 6007必须最后武装:驱动器的guard计时器从上次RTR起持续累计,先武装再配时间
+        # 会被旧计时立即判超时(EMCY 0x8100, 2026-10-28 candump铁证);
+        # 先6007=0不处理, guard流确认建立后再6007=1报错.
         self._verified_write(0x1017, 0)
+        self._verified_write(0x6007, 0, signed=True)
         self._verified_write(0x100C, 200)
         self._verified_write(0x100D, 3, size=1)
         if self.sdo.read(0x100E, size=4) != 0x700 + self.sdo.node_id:
             raise LiftError('Unexpected node-guard COB-ID; restore it in KS3 first.')
-        self._verified_write(0x6007, 1, signed=True)
         self.guard_active = True
         self.guard_since = time.monotonic()
         self.sdo.guard_time = self.sdo.guard_toggle = None
         self.sdo.nmt(0x01)
         self.sdo.guard()
         self._wait_word(lambda w: self.sdo.guard_time is not None)
+        self._verified_write(0x6007, 1, signed=True)
         # 用当前反馈初始化目标,再使能;此处不触发bit4位置运动.
         self._write(0x607A, self.position, size=4, signed=True)
         self._write(0x6040, 0x0007)

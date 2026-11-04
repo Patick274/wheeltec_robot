@@ -13,7 +13,7 @@ keyboard_cruise_rpm: 1000.0
 keyboard_approach_rpm: 100.0
 # 与实物同一坐标系(2026-11-02重新标定值),仿真才代表真机行为.
 keyboard_lower_position_counts: -447240
-keyboard_upper_position_counts: 121708266
+keyboard_upper_position_counts: 121681191
 keyboard_down_slow_counts: 2465161
 keyboard_up_slow_counts: 118795161
 

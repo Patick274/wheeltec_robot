@@ -4,6 +4,7 @@
 SIGKILL与os._exit没有任何Python清理机会,验收的是驱动器侧节点保护超时
 (仿真600ms)独立兜底,不是atexit.
 """
+import os
 import pathlib
 import socket
 import struct
@@ -21,7 +22,7 @@ from kinco_lift.simulator import SimulatedCan
 FRAME = struct.Struct('=HBB8s')  # can_id, remote, dlc, data
 
 CHILD = '''
-import atexit, os, signal, socket, struct, sys
+import atexit, os, signal, socket, struct, sys, time
 sys.path.insert(0, {src!r})
 from kinco_lift.canopen import SdoClient
 from kinco_lift.controller import LiftConfig, LiftController
@@ -70,6 +71,8 @@ elif scenario == 'sigkill':
     os.kill(os.getpid(), signal.SIGKILL)
 elif scenario == 'os_exit':
     os._exit(1)
+elif scenario == 'wait':
+    time.sleep(60)  # 由父进程terminate;不执行正常close或解释器退出钩子.
 '''
 
 
@@ -82,8 +85,12 @@ class DriveServer:
         self.listener = socket.socket()
         self.listener.bind(('127.0.0.1', 0))
         self.listener.listen(1)
+        self.listener.settimeout(0.05)
         self.port = self.listener.getsockname()[1]
         self.stopped = False
+        self.connection = None
+        self.child_paths = []
+        self.children = []
         self.thread = threading.Thread(target=self._serve, daemon=True)
 
     def _tick_until_stop(self):
@@ -92,47 +99,79 @@ class DriveServer:
             time.sleep(0.02)
 
     def _serve(self):
-        conn, _ = self.listener.accept()
-        conn.settimeout(0.05)
         while not self.stopped:
             try:
-                record = self._read(conn, FRAME.size)
+                conn, _ = self.listener.accept()
             except socket.timeout:
-                self.sim._step()
                 continue
-            if record is None:  # 子进程退出/被杀:没有流量也要继续走表.
-                self._tick_until_stop()
-                return
-            can_id, remote, dlc, data = FRAME.unpack(record)
-            self.sim.send(can_id, data[:dlc], bool(remote))
-            while True:
-                reply = self.sim.recv(0)
-                if reply is None:
+            except OSError:
+                if self.stopped:  # Windows关闭listener会唤醒accept并报10038.
+                    return
+                raise
+            break
+        else:
+            return
+        self.connection = conn
+        conn.settimeout(0.05)
+        pending = b''
+        try:
+            while not self.stopped:
+                try:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    pending += chunk
+                    while len(pending) >= FRAME.size:
+                        record, pending = pending[:FRAME.size], pending[FRAME.size:]
+                        can_id, remote, dlc, data = FRAME.unpack(record)
+                        self.sim.send(can_id, data[:dlc], bool(remote))
+                        while True:
+                            reply = self.sim.recv(0)
+                            if reply is None:
+                                break
+                            rid, rdata = reply
+                            conn.sendall(FRAME.pack(rid, 0, len(rdata), rdata.ljust(8, b'\0')))
+                except socket.timeout:
+                    self.sim._step()
+                except OSError:
+                    # 强杀可产生EOF或连接重置;两者都表示主站不再发送流量.
                     break
-                rid, rdata = reply
-                conn.sendall(FRAME.pack(rid, 0, len(rdata), rdata.ljust(8, b'\0')))
-
-    @staticmethod
-    def _read(conn, size):
-        data = b''
-        while len(data) < size:
-            chunk = conn.recv(size - len(data))
-            if not chunk:
-                return None
-            data += chunk
-        return data
+        finally:
+            conn.close()
+        # 子进程退出/被杀后模拟驱动器仍独立走表,监督超时才会停车.
+        self._tick_until_stop()
 
     def run_child(self, scenario):
-        with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False) as f:
+        # 源码含中文项目路径;Windows默认ANSI编码不能保存它.先关文件再启动子进程.
+        with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False,
+                                         encoding='utf-8', newline='\n') as f:
             f.write(CHILD.format(src=str(ROOT / 'src')))
             path = f.name
-        return subprocess.Popen([sys.executable, path, scenario, str(self.port)],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.child_paths.append(path)
+        proc = subprocess.Popen([sys.executable, '-B', path, scenario, str(self.port)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=dict(os.environ, PYTHONIOENCODING='utf-8',
+                                         PYTHONDONTWRITEBYTECODE='1'))
+        self.children.append(proc)
+        return proc
 
     def close(self):
+        for proc in self.children:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate(timeout=3)
         self.stopped = True
-        self.thread.join(timeout=2)
+        if self.connection is not None:
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         self.listener.close()
+        self.thread.join(timeout=2)
+        for path in self.child_paths:
+            pathlib.Path(path).unlink()
+        if self.thread.is_alive():
+            raise RuntimeError('DriveServer thread did not stop.')
 
 
 class CrashProcessTests(unittest.TestCase):
@@ -148,13 +187,14 @@ class CrashProcessTests(unittest.TestCase):
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            self.fail('Child process hung: ' + proc.stderr.read().decode('utf-8', 'replace'))
+            stdout, stderr = proc.communicate(timeout=3)
+            self.fail('Child process hung: ' + stderr.decode('utf-8', 'replace'))
         return stdout, stderr
 
     def test_normal_exit_quick_stops_drive(self):
         proc = self.server.run_child('normal')
-        self.wait_child(proc)
-        self.assertEqual(proc.returncode, 0)
+        stdout, stderr = self.wait_child(proc)
+        self.assertEqual(proc.returncode, 0, stderr.decode('utf-8', 'replace'))
         self.assertEqual(self.server.sim.od[(0x6040, 0)][2], 0x000B)
         self.assertFalse(self.server.sim.enabled)
         self.assertFalse(self.server.sim.moving)
@@ -169,8 +209,18 @@ class CrashProcessTests(unittest.TestCase):
         self.assertFalse(self.server.sim.enabled)
 
     def check_supervision_only_backstop(self, scenario):
-        """SIGKILL/os._exit:无Python清理,60FF残留,但驱动器节点保护超时独立停车."""
-        proc = self.server.run_child(scenario)
+        """无Python清理的退出保留60FF,仅独立驱动器监督可以停车."""
+        proc = self.server.run_child('wait' if scenario == 'terminate' else scenario)
+        if scenario == 'terminate':
+            deadline = time.monotonic() + 5
+            while self.server.sim.od[(0x60FF, 0)][2] == 0:
+                if proc.poll() is not None:
+                    self.fail('Child exited before reaching the velocity command.')
+                if time.monotonic() > deadline:
+                    self.fail('Child never reached the velocity command.')
+                time.sleep(0.005)
+            # POSIX默认SIGTERM和WindowsTerminateProcess都不执行Python清理钩子.
+            proc.terminate()
         self.wait_child(proc)
         sim = self.server.sim
         self.assertNotEqual(sim.od[(0x60FF, 0)][2], 0)  # 残留正是10-27事故形态.
@@ -185,9 +235,12 @@ class CrashProcessTests(unittest.TestCase):
         self.assertFalse(sim.enabled)
         self.assertFalse(sim.moving)
 
+    @unittest.skipUnless(os.name == 'posix', 'SIGKILL is a POSIX-specific exit path.')
     def test_sigkill_relies_on_drive_supervision(self):
         self.check_supervision_only_backstop('sigkill')
-        self.assertEqual(self.server and True, True)
+
+    def test_forced_termination_relies_on_drive_supervision(self):
+        self.check_supervision_only_backstop('terminate')
 
     def test_os_exit_relies_on_drive_supervision(self):
         self.check_supervision_only_backstop('os_exit')

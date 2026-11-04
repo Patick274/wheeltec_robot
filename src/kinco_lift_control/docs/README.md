@@ -1,5 +1,7 @@
 # 接线与联调指南
 
+2026-11-04进度与上限位正式释放流程见[最新交接](PROGRESS_20261104.md)。
+
 Kvaser兼容USB-CAN的最新接入流程见同目录KVASER_SOCKETCAN.md；
 旧PDF按先前candleLight方案编写，驱动步骤以新指南及实际USB/接口诊断为准。
 

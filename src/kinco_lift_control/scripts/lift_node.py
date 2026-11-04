@@ -60,7 +60,7 @@ class LiftNode:
         sdo = SdoClient(transport, node_id, float(params.get('sdo_timeout_s', 0.15)))
         self.axis = LiftController(sdo, self.cfg,
                                    self.parking.health_reason if self.allow_moving else self.parking.reason,
-                                   self.current_speed_cap)
+                                   self.current_speed_cap, recovery_interlock=self.parking.reason)
         # rospy.on_shutdown只在signal_shutdown时运行;崩溃退出的未处理异常不触发它,
         # 必须另挂解释器级兜底,否则驱动器残留60FF继续溜车(2026-10-27事故).
         atexit.register(self.failsafe_shutdown)
@@ -89,6 +89,7 @@ class LiftNode:
             rospy.Service('~reference_here', Trigger, self.reference),
             rospy.Service('~reference_from_frame', Trigger, self.reference_from_frame),
             rospy.Service('~recover_to_lower_limit', Trigger, self.recover_to_lower_limit),
+            rospy.Service('~escape_upper_limit', Trigger, self.escape_upper_limit),
             rospy.Service('~move', MoveLift, self.move),
             rospy.Service('~jog', JogLift, self.jog),
             rospy.Service('~enable_keyboard', SetBool, self.enable_keyboard),
@@ -159,7 +160,8 @@ class LiftNode:
         auto_fresh = (self.base_auto_hold and self.base_request_id and self.base_request_time is not None
                       and time.monotonic() - self.base_request_time <= 0.3)
         requested_rpm = abs(status['commanded_rpm']) if self.axis.control_mode == 3 else status['profile_rpm']
-        return bool((self.base_motion_requested or auto_fresh) and status['connected'] and not status['error_status']
+        return bool((self.base_motion_requested or auto_fresh) and not status.get('upper_escape_phase')
+                    and status['connected'] and not status['error_status']
                     and not status['error_status2'] and not status['stop_latched']
                     and not self.parking.health_reason()
                     and abs(status['velocity_raw']) <= self.cfg.velocity_raw(self.cfg.moving_max_rpm)
@@ -220,6 +222,10 @@ class LiftNode:
     def reference_from_frame(self, req):
         """Trigger:高位受困应急锚点;帧完好核验后参考锚到zones.lower,到家后必须物理对零."""
         return TriggerResponse(*self._run(self.axis.reference_from_frame))
+
+    def escape_upper_limit(self, req):
+        """Trigger:受监督下行释放上限位;完成后保持使能,不自动建参考."""
+        return TriggerResponse(*self._run(self.axis.escape_upper_limit))
 
     def move(self, req):
         """MoveLift:height_mm是绝对伸出高度,speed_mm_s是正的线速度."""

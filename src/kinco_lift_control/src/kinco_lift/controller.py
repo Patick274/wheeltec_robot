@@ -104,9 +104,10 @@ class LiftConfig:
 
 class LiftController:
     """维护一个轴的会话状态;所有命令串行执行,不排队叠加运动."""
-    def __init__(self, sdo, config, interlock, speed_limit=None):
+    def __init__(self, sdo, config, interlock, speed_limit=None, recovery_interlock=None):
         self.sdo, self.cfg, self.interlock = sdo, config, interlock
         self.speed_limit = speed_limit or (lambda: self.cfg.max_rpm)
+        self.recovery_interlock = recovery_interlock or interlock
         self.lock = threading.RLock()
         self.connected = self.armed = self.busy = False
         self.stopping = False  # 已请求停机,但尚未由反馈确认停稳.
@@ -133,6 +134,13 @@ class LiftController:
         self.recovering = False
         self.recover_deadline = self.recover_start = None
         self.recover_velocity = 0
+        # 上端释放独立于回下限位;holding继续保持使能,直到显式disable/stop.
+        self.upper_escape_phase = ''
+        self.upper_escape_start = self.upper_escape_target = None
+        self.upper_escape_deadline = self.upper_escape_halt_deadline = None
+        self.upper_escape_rpm = 0
+        self.upper_escape_released = False
+        self.upper_escape_lowest = self.upper_escape_hold_position = None
         self.budget = MotionBudget(config.budget_seconds, config.cooldown_seconds)
         self.feedback_position = self.feedback_time = None
         self.stop_event = threading.Event()
@@ -216,7 +224,9 @@ class LiftController:
             if not self.armed:
                 return
             self._check_interlock()
-            if self.control_mode == 3 and not self.recovering:
+            if self.upper_escape_phase:
+                self._check_escape_interlock()
+            elif self.control_mode == 3 and not self.recovering:
                 self._keyboard_poll()
             elif self.busy and not self.recovering:
                 self._refresh_position_speed()
@@ -241,7 +251,8 @@ class LiftController:
             self.word = self.sdo.read(0x6041, size=2)
             self.position = self.sdo.read(0x6063, signed=True)
             feedback_now = time.monotonic()
-            if (self.cfg.zones and self.frame_confirmed and self.feedback_time is not None):
+            if (self.cfg.zones and (self.frame_confirmed or self.upper_escape_phase)
+                    and self.feedback_time is not None):
                 elapsed = max(0.0, feedback_now - self.feedback_time)
                 allowed_mm = self.cfg.max_speed * elapsed * 2 + self.cfg.coordinate_tolerance
                 if abs(self.position - self.feedback_position) * self.cfg.mm_rev / self.cfg.counts > allowed_mm:
@@ -291,7 +302,9 @@ class LiftController:
                         raise LiftError('No fresh toggling node-guard response.')
                 if not self.word & 4:
                     raise LiftError('Drive unexpectedly left operation-enabled state.')
-            if self.armed and self.recovering:
+            if self.armed and self.upper_escape_phase:
+                self._upper_escape_poll()
+            elif self.armed and self.recovering:
                 self._recover_poll()
             elif self.armed and self.control_mode == 3:
                 if self.sdo.read(0x6061, size=1, signed=True) != 3:
@@ -528,17 +541,139 @@ class LiftController:
         self.recover_velocity = 0
         self.last_error = 'Recovery complete at lower limit; call reference_here to establish reference.'
 
+    def _check_escape_interlock(self):
+        reason = self.recovery_interlock()
+        if reason:
+            raise LiftError(reason)
+
+    def escape_upper_limit(self, rpm=50, timeout_s=10):
+        """显式上端释放:只下行,最多10s/20mm,回到正常边界后停稳并保持使能.
+
+        不要求已有会话参考,但必须核对已标定原始帧和精度;不自动建参考或回到底部.
+        服务回执只代表启动;holding状态确认停稳,显式disable后才可重新确认参考.
+        """
+        with self.lock:
+            self.cfg.validate_motion()
+            rpm, timeout_s = finite(rpm, 'escape rpm'), finite(timeout_s, 'escape timeout')
+            if not 0 < rpm <= 100 or not 0 < timeout_s <= 10:
+                raise LiftReject('Upper escape requires 0<rpm<=100 and 0<timeout<=10s.')
+            if self.armed or self.busy or self.stopping or self.latched or self.recovering:
+                raise LiftReject('Upper escape requires a disabled, idle, non-faulted axis.')
+            if not self.cfg.zones:
+                raise LiftReject('Upper escape requires commissioned raw zones.')
+            self._check_escape_interlock()
+            self.poll()
+            if self.budget.remaining <= 0:
+                raise LiftReject('Motion duty budget exhausted; full stationary cooldown required.')
+            lower, upper = self._limits()
+            if lower or not upper:
+                raise LiftReject('Upper escape requires ONLY the upper limit active.')
+            if abs(self.velocity) > self.cfg.velocity_raw(1):
+                raise LiftReject('Axis must be stationary before upper escape.')
+            if self.sdo.read(0x6410, sub=3) != self.cfg.counts:
+                raise LiftError('Drive feedback precision differs from configured counts per revolution.')
+            zones = self.cfg.zones
+            tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
+            if not zones.upper - tolerance <= self.position <= zones.upper + tolerance:
+                raise LiftReject('Upper switch position is outside the commissioned raw frame.')
+            target = min(zones.upper_stop,
+                         zones.lower + math.floor(self.cfg.travel * self.cfg.counts / self.cfg.mm_rev))
+            if not zones.lower_stop < target < self.position or (
+                    (self.position - target) * self.cfg.mm_rev / self.cfg.counts > 20):
+                raise LiftReject('Upper escape cannot reach normal travel within its 20mm bound.')
+            rpm = min(rpm, self._speed_cap(), 100)
+            self.upper_escape_start, self.upper_escape_target = self.position, target
+            self.upper_escape_lowest = self.position
+            self.upper_escape_hold_position = None
+            self.upper_escape_rpm = rpm
+            self.upper_escape_released = False
+            self.upper_escape_phase = 'starting'
+            self.busy = self.took_control = True  # 首次写入前即可由stop接管部分使能失败.
+            try:
+                self._enable_drive(3)
+                self.armed = True
+                self.poll()  # 握手期间反馈/底盘状态可能变化,首次非零指令前再核验.
+                self._check_escape_interlock()
+                self.upper_escape_deadline = time.monotonic() + timeout_s
+                self.upper_escape_phase = 'descending'
+                self._write(0x60FF, -self.cfg.velocity_raw(rpm), size=4, signed=True)
+                self.command_rpm = -rpm
+                self.key_direction = 0
+                self.key_time = None
+                self.neutral_required = True
+                self.last_error = 'Upper escape descending; completion requires holding status.'
+            except (CanError, OSError, LiftError, ValueError, OverflowError):
+                self.fail('Upper escape startup failed; inspect drive before resetting.')
+                raise
+
+    def _halt_upper_escape(self, reason):
+        self._write(0x60FF, 0, size=4, signed=True)
+        self.command_rpm = 0
+        if self.upper_escape_phase != 'halting':
+            self.upper_escape_halt_deadline = time.monotonic() + 2
+        self.upper_escape_phase = 'halting'
+        self.busy = True  # 反馈确认停稳后才进入holding,不能因写入成功提前结束.
+        self.last_error = reason
+
+    def _upper_escape_poll(self):
+        """独立的下行/停车/保持状态;不进入需要键盘确认的普通速度分支."""
+        self._check_escape_interlock()
+        if self.sdo.read(0x6061, size=1, signed=True) != 3:
+            raise LiftError('Upper escape lost profile velocity mode.')
+        if abs(self.velocity) > self.cfg.velocity_raw(100):
+            raise LiftError('Upper escape feedback exceeds 100rpm.')
+        if self.velocity > self.cfg.velocity_raw(1):
+            raise LiftError('Upper escape feedback moved in the wrong direction.')
+        if self.position > self.upper_escape_lowest + self._tolerance_counts():
+            raise LiftError('Upper escape reversed away from its lowest position.')
+        self.upper_escape_lowest = min(self.upper_escape_lowest, self.position)
+        tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
+        if (self.sdo.read(0x6410, sub=3) != self.cfg.counts or
+                not self.cfg.zones.lower - tolerance <= self.position <= self.cfg.zones.upper + tolerance):
+            raise LiftError('Upper escape encoder frame/precision changed.')
+        lower, upper = self._limits()
+        if lower or (self.upper_escape_released and upper):
+            raise LiftError('Unexpected travel limit during upper escape.')
+        self.upper_escape_released = self.upper_escape_released or not upper
+        delta_mm = (self.upper_escape_start - self.position) * self.cfg.mm_rev / self.cfg.counts
+        if delta_mm < -self.cfg.tolerance or delta_mm > 20:
+            raise LiftError('Upper escape exceeded direction/distance bound.')
+        if self.upper_escape_phase == 'descending':
+            if self.upper_escape_released and self.position <= self.upper_escape_target:
+                self._halt_upper_escape('Upper limit released inside normal travel; confirming standstill.')
+            elif time.monotonic() >= self.upper_escape_deadline:
+                raise LiftError('Upper escape timeout; switch/normal travel not reached.')
+            else:
+                self.upper_escape_rpm = min(self.upper_escape_rpm, self._speed_cap(), 100)
+                self.command_rpm = -self.upper_escape_rpm
+                self._write(0x60FF, -self.cfg.velocity_raw(self.upper_escape_rpm), size=4, signed=True)
+                return
+        if self.upper_escape_phase == 'halting':
+            self._write(0x60FF, 0, size=4, signed=True)
+            if abs(self.velocity) > self.cfg.velocity_raw(1):
+                if time.monotonic() >= self.upper_escape_halt_deadline:
+                    raise LiftError('Upper escape halt failed to reach standstill.')
+                return
+            self.upper_escape_phase = 'holding'
+            self.upper_escape_hold_position = self.position
+            self.busy = False
+            self.last_error += ' Holding enabled; explicitly disable before confirming coordinates.'
+        elif self.upper_escape_phase == 'holding':
+            if (abs(self.velocity) > self.cfg.velocity_raw(1) or
+                    abs(self.position - self.upper_escape_hold_position) > self._tolerance_counts()):
+                raise LiftError('Upper escape holding lost standstill/position.')
+
     def _record_checked_reference(self):
         """位置/键盘共用核验,不能把新零点套入旧的绝对计数速度区."""
-        self.reference = None
-        self.frame_confirmed = self.keyboard_confirmed = False
         lower, upper = self._limits()
         if not lower or upper:
             raise LiftReject('Reference requires the real lower limit only.')
-        if self.sdo.read(0x6410, sub=3) != self.cfg.counts:
-            raise LiftError('Drive feedback precision differs from configured counts per revolution.')
         if abs(self.velocity) > self.cfg.velocity_raw(1):
             raise LiftReject('Axis must be stationary before confirming coordinates.')
+        self.reference = None
+        self.frame_confirmed = self.keyboard_confirmed = False
+        if self.sdo.read(0x6410, sub=3) != self.cfg.counts:
+            raise LiftError('Drive feedback precision differs from configured counts per revolution.')
         if self.cfg.zones:
             tolerance = self.cfg.coordinate_tolerance * self.cfg.counts / self.cfg.mm_rev
             if abs(self.position - self.cfg.zones.lower) > tolerance:
@@ -654,7 +789,11 @@ class LiftController:
     def operator_halt(self):
         """跨模式普通停车;位置模式用bit8暂停,不取消使能,也不恢复旧任务."""
         with self.lock:
-            if self.armed and self.control_mode == 1:
+            if self.upper_escape_phase:
+                self._halt_upper_escape('Upper escape cancelled by operator; confirming standstill.')
+            elif self.recovering:
+                self.stop('Recovery cancelled by operator halt.')
+            elif self.armed and self.control_mode == 1:
                 if not self.position_halted:
                     self._write(0x6040, 0x012F)
                     self.halt_started = time.monotonic()
@@ -680,6 +819,12 @@ class LiftController:
         与全局stop的故障锁存不同;不取消使能,不自动复位故障.
         """
         with self.lock:
+            if self.upper_escape_phase:
+                self._halt_upper_escape('Upper escape cancelled by keyboard; confirming standstill.')
+                return
+            if self.recovering:
+                self.stop('Recovery cancelled by keyboard halt.')
+                return
             if self.armed and self.control_mode == 3:
                 self._set_keyboard_rpm(0)
             self.key_direction = 0
@@ -696,6 +841,11 @@ class LiftController:
         with self.lock:
             if isinstance(direction, bool) or direction not in (-1, 0, 1):
                 raise LiftError('Keyboard direction must be -1, 0 or +1.')  # 话题通道异常值,按外部异常锁存.
+            if self.upper_escape_phase or self.recovering:
+                if direction == 0:
+                    self.operator_halt()
+                    return
+                raise LiftReject('Keyboard motion is blocked during recovery/upper escape.')
             if direction == 0:
                 if self.armed and self.control_mode == 3:
                     self.poll()
@@ -762,6 +912,7 @@ class LiftController:
             self.position_rpm = 0
             self.recovering = False
             self.recover_velocity = 0
+            self.upper_escape_phase = ''
             confirmed = False
             self.position_halting = self.position_halted = False
             self.halt_started = None
@@ -788,6 +939,7 @@ class LiftController:
                 self._write(0x6040, 0x0006)
                 self._wait_word(lambda w: not w & 4)
             self.armed = False
+            self.upper_escape_phase = ''
 
     def reset(self):
         """人工故障复位;保持不使能,撤销旧参考,不恢复被中断的目标."""
@@ -834,6 +986,11 @@ class LiftController:
                     commanded_rpm=self.command_rpm,
                     profile_rpm=self.position_rpm,
                     recovering=self.recovering,
+                    upper_escape_phase=self.upper_escape_phase,
+                    upper_escape_target_counts=self.upper_escape_target,
+                    upper_escape_complete=bool(self.upper_escape_phase == 'holding' and not upper
+                                               and self.upper_escape_target is not None
+                                               and self.position <= self.upper_escape_target),
                     initial_top_height_m=initial,
                     top_height_m=(initial + height_mm / 1000 if initial is not None and height_mm is not None else None),
                     target_top_height_m=(initial + self.target_mm / 1000

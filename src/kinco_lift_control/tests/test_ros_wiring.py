@@ -82,6 +82,7 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIn('~confirm_keyboard_coordinates', names)
         self.assertIn('~keyboard_stop', names)
         self.assertIn('~recover_to_lower_limit', names)
+        self.assertIn('~escape_upper_limit', names)
         self.assertIn('~reference_from_frame', names)
         topics = [call.args[0] for call in self.ros.Subscriber.call_args_list]
         self.assertIn('~keyboard_command', topics)

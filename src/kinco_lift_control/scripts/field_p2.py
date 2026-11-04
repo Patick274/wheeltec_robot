@@ -5,6 +5,7 @@
 用法:
   python3 scripts/field_p2.py watch            # 只读监控(故障指纹/位置/限位), Ctrl-C 结束
   python3 scripts/field_p2.py recover          # 回下限位并重建参考(含resetFault)
+  python3 scripts/field_p2.py escape_upper     # 受监督释放上限位,停稳保留使能,不复位/建参考
   python3 scripts/field_p2.py move 50 3        # 位置模式到50mm, 速度3mm/s
   python3 scripts/field_p2.py halt             # 暂停(bit8, 保留使能)
   python3 scripts/field_p2.py stop             # 停机锁存
@@ -103,7 +104,7 @@ def cmd_recover(rospy, String):
         if not d['recovering']:
             break
         if time.monotonic() - t0 > 15:
-            print('恢复超时(单次限10s/约112mm, 位置更高需再次调用)')
+            print('恢复未确认完成(单次10s, 默认50rpm理论约18.75mm); 请检查状态, 不自动重试.')
             return 1
     show('recovered', d)
     if not d['lower_limit']:
@@ -150,9 +151,32 @@ def cmd_move(rospy, String, height, speed):
             return 1
 
 
-def main():
+def cmd_escape_upper(rospy, String):
+    """只向正式节点申请受监督流程;不打开CAN,不自动复位、续跑或撤使能."""
+    from std_srvs.srv import Trigger
+    cache = StatusCache(rospy, String)
+    r = rospy.ServiceProxy('/lift/escape_upper_limit', Trigger)()
+    print('escape_upper ->', r.success, '|', r.message)
+    if not r.success:
+        return 1
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        d = cache()
+        if d['stop_latched'] or d['error_status'] or d['error_status2']:
+            show('escape-fault', d)
+            return 1
+        if d.get('upper_escape_phase') == 'holding':
+            show('holding-enabled', d)
+            return 0 if d.get('upper_escape_complete', False) else 1
+        time.sleep(0.1)
+    print('未确认完成; 请求stop, 继续查看节点反馈.')
+    rospy.ServiceProxy('/lift/stop', Trigger)()
+    return 1
+
+
+def main(args=None):
     rospy, String = connect()
-    args = sys.argv[1:]
+    args = sys.argv[1:] if args is None else args
     if not args or args[0] == 'status':
         show('status', fresh_status(rospy, String))
         return 0
@@ -161,6 +185,8 @@ def main():
         return 0
     if args[0] == 'recover':
         return cmd_recover(rospy, String)
+    if args[0] == 'escape_upper':
+        return cmd_escape_upper(rospy, String)
     if args[0] == 'move' and len(args) == 3:
         return cmd_move(rospy, String, float(args[1]), float(args[2]))
     if args[0] == 'halt':

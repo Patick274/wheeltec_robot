@@ -1,5 +1,8 @@
 # kinco_lift_control：FD125升降控制包
 
+同步后复查与下一阶段入口见[本轮交接](docs/REVIEW_20261104_SYNC.md)。
+包级说明已更新为当前源码,底盘联调按[ P2-5 explain](docs/P2_5_BASE_INTEGRATION/explain.yaml)逐步记录。
+
 2026-11-04最新进度、上限位受困修复与后续验收见[当前交接](docs/PROGRESS_20261104.md)。
 新增受监督的/lift/escape_upper_limit; limit_escape.py现为ROS客户端,需要lift节点运行。
 

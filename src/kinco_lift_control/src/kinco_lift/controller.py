@@ -610,6 +610,10 @@ class LiftController:
     def _halt_upper_escape(self, reason):
         self._write(0x60FF, 0, size=4, signed=True)
         self.command_rpm = 0
+        if self.upper_escape_phase == 'holding':
+            # 重复暂停/键盘中立不能重建保持锚点,也不能重置速度去抖时钟.
+            self.last_error = reason
+            return
         if self.upper_escape_phase != 'halting':
             self.upper_escape_halt_deadline = time.monotonic() + 2
         self.upper_escape_phase = 'halting'
@@ -623,7 +627,7 @@ class LiftController:
             raise LiftError('Upper escape lost profile velocity mode.')
         if abs(self.velocity) > self.cfg.velocity_raw(100):
             raise LiftError('Upper escape feedback exceeds 100rpm.')
-        if self.velocity > self.cfg.velocity_raw(1):
+        if self.upper_escape_phase != 'holding' and self.velocity > self.cfg.velocity_raw(1):
             raise LiftError('Upper escape feedback moved in the wrong direction.')
         if self.position > self.upper_escape_lowest + self._tolerance_counts():
             raise LiftError('Upper escape reversed away from its lowest position.')

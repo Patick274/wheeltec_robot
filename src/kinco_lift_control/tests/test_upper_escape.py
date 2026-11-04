@@ -255,9 +255,9 @@ class UpperEscapeTests(unittest.TestCase):
         # 单次过阈值不得判故障; 持续>0.5s仍须判.
         self.hold()
         original = self.axis.sdo.read
-        dither = -self.cfg.velocity_raw(2)  # 负值: 上行速度会触发反向检查(实机抖动为-1.04rpm).
-        for i in range(4):
-            raw = dither if i % 2 == 0 else 0
+        dither = self.cfg.velocity_raw(2)
+        # 零速保持的正负抖动应对称处理;下降/停车阶段仍立即拒绝上行反馈.
+        for raw in (dither, 0, -dither, 0):
             with patch.object(self.axis.sdo, 'read',
                               side_effect=lambda idx, *a, **k: raw if idx == 0x606C else original(idx, *a, **k)):
                 self.axis.poll()
@@ -268,6 +268,32 @@ class UpperEscapeTests(unittest.TestCase):
                           side_effect=lambda idx, *a, **k: dither if idx == 0x606C else original(idx, *a, **k)):
             with self.assertRaisesRegex(LiftError, 'holding'):
                 self.axis.poll()
+
+    def test_repeated_neutral_cannot_reset_holding_velocity_timer(self):
+        self.hold()
+        original = self.axis.sdo.read
+        raw = -self.cfg.velocity_raw(2)
+        with patch.object(self.axis.sdo, 'read',
+                          side_effect=lambda idx, *a, **k: raw if idx == 0x606C else original(idx, *a, **k)):
+            self.axis.poll()
+            self.axis.upper_escape_drift_since = time.monotonic() - 1
+            self.axis.keyboard_command(0)
+            self.assertEqual(self.axis.upper_escape_phase, 'holding')
+            with self.assertRaisesRegex(LiftError, 'holding'):
+                self.axis.poll()
+
+    def test_repeated_halt_cannot_move_holding_position_anchor(self):
+        self.hold()
+        anchor = self.axis.upper_escape_hold_position
+        self.position(anchor - round(0.15 * 65536 / 2.25))
+        self.axis.operator_halt()
+        self.axis.poll()
+        self.assertEqual(self.axis.upper_escape_phase, 'holding')
+        self.assertEqual(self.axis.upper_escape_hold_position, anchor)
+        self.position(anchor - round(0.3 * 65536 / 2.25))
+        self.axis.operator_halt()
+        with self.assertRaisesRegex(LiftError, 'holding'):
+            self.axis.poll()
 
     def test_feedback_reverse_or_over_100rpm_is_fault(self):
         self.axis.escape_upper_limit()

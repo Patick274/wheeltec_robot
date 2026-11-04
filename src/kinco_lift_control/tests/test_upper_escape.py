@@ -187,6 +187,9 @@ class UpperEscapeTests(unittest.TestCase):
         self.axis.budget.used = 0
         self.axis.guard_since = time.monotonic() - 1
         self.axis.sdo.guard_time = None
+        # 后台guard线程每100ms按last_io门控刷新guard_time;把last_io置陈旧,
+        # 阻止它在断言前抢刷,消除"guard响应确实不再到达"场景的时序竞争.
+        self.axis.sdo.last_io = time.monotonic() - 1
         with self.assertRaisesRegex(LiftError, 'guard'):
             self.axis.poll()
 

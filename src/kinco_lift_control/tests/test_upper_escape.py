@@ -250,6 +250,25 @@ class UpperEscapeTests(unittest.TestCase):
         with self.assertRaisesRegex(LiftError, 'holding'):
             self.axis.poll()
 
+    def test_holding_velocity_dither_tolerated_sustained_motion_faults(self):
+        # 2026-11-04实机: 零速保持对抗弹簧时速度读数在1rpm阈值附近抖动,
+        # 单次过阈值不得判故障; 持续>0.5s仍须判.
+        self.hold()
+        original = self.axis.sdo.read
+        dither = -self.cfg.velocity_raw(2)  # 负值: 上行速度会触发反向检查(实机抖动为-1.04rpm).
+        for i in range(4):
+            raw = dither if i % 2 == 0 else 0
+            with patch.object(self.axis.sdo, 'read',
+                              side_effect=lambda idx, *a, **k: raw if idx == 0x606C else original(idx, *a, **k)):
+                self.axis.poll()
+        self.assertEqual(self.axis.upper_escape_phase, 'holding')
+        self.assertFalse(self.axis.latched)
+        self.axis.upper_escape_drift_since = time.monotonic() - 1
+        with patch.object(self.axis.sdo, 'read',
+                          side_effect=lambda idx, *a, **k: dither if idx == 0x606C else original(idx, *a, **k)):
+            with self.assertRaisesRegex(LiftError, 'holding'):
+                self.axis.poll()
+
     def test_feedback_reverse_or_over_100rpm_is_fault(self):
         self.axis.escape_upper_limit()
         original = self.axis.sdo.read

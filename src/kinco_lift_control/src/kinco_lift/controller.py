@@ -141,6 +141,7 @@ class LiftController:
         self.upper_escape_rpm = 0
         self.upper_escape_released = False
         self.upper_escape_lowest = self.upper_escape_hold_position = None
+        self.upper_escape_drift_since = None
         self.budget = MotionBudget(config.budget_seconds, config.cooldown_seconds)
         self.feedback_position = self.feedback_time = None
         self.stop_event = threading.Event()
@@ -656,12 +657,21 @@ class LiftController:
                 return
             self.upper_escape_phase = 'holding'
             self.upper_escape_hold_position = self.position
+            self.upper_escape_drift_since = None
             self.busy = False
             self.last_error += ' Holding enabled; explicitly disable before confirming coordinates.'
         elif self.upper_escape_phase == 'holding':
-            if (abs(self.velocity) > self.cfg.velocity_raw(1) or
-                    abs(self.position - self.upper_escape_hold_position) > self._tolerance_counts()):
+            # 位置漂移瞬时判;速度超阈值需持续0.5s——零速保持对抗弹簧负载时
+            # 伺服速度读数在阈值附近抖动(2026-11-04实机单次-1.04rpm误报).
+            if abs(self.position - self.upper_escape_hold_position) > self._tolerance_counts():
                 raise LiftError('Upper escape holding lost standstill/position.')
+            if abs(self.velocity) > self.cfg.velocity_raw(1):
+                if self.upper_escape_drift_since is None:
+                    self.upper_escape_drift_since = time.monotonic()
+                elif time.monotonic() - self.upper_escape_drift_since >= 0.5:
+                    raise LiftError('Upper escape holding lost standstill/position.')
+            else:
+                self.upper_escape_drift_since = None
 
     def _record_checked_reference(self):
         """位置/键盘共用核验,不能把新零点套入旧的绝对计数速度区."""

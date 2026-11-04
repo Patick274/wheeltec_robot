@@ -5,12 +5,12 @@ node_id: 1
 sdo_timeout_s: 0.15
 poll_hz: 10.0
 
-motion_enabled: false  # 2026-11-03 顺序1/2现场窗口关闭, 回退.
+motion_enabled: false  # 2026-11-04 释放验收+脏杀滑行窗口关闭, 回退.
 commissioning_confirmed: false
 # 需实测两个方向的硬件限位,驱动器输入功能和极性.
 # 2026-10-26用户已反馈双向硬限位有效;2026-10-27 G阶段与10-28/11-02 P2低速段已验证,联动验收前保持false.
 # 2026-11-02 上端速度区验收临时开启;结束后必须回退false.
-# 2026-11-03 顺序1/2现场窗口(上限位实测+C1重测+制动), 结束后回退false.
+# 2026-11-03/11-04 现场窗口(上限位实测+C1重测+制动+释放验收+脏杀), 结束后回退false.
 drive_limits_verified: false
 
 # Windows实际参数已读到65536 inc/电机转;Jetson首次接入仍需回读核对.

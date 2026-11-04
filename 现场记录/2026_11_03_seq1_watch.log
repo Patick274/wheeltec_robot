@@ -1,0 +1,16 @@
+只读监控中, Ctrl-C 结束. 异常位(故障/EMCY/限位变化)会逐行打印.
+INIT t=1818.7 en=False busy=False rec=False latch=False counts=421309 pos=None top=None vel=0.3rpm sw=0x4231 err=0000/0000 emcy=0000 budget=110s msg=''
+CHANGE t=1879.3 en=False busy=False rec=False latch=True counts=-113260 pos=None top=None vel=0.2rpm sw=0x4250 err=0000/0000 emcy=0000 budget=99s msg='Lower limit not reached within recovery timeout
+CHANGE t=1952.9 en=False busy=False rec=False latch=False counts=-113260 pos=None top=None vel=0.1rpm sw=0x4231 err=0000/0000 emcy=0000 budget=99s msg=''
+CHANGE t=1963.4 en=False busy=False rec=False latch=False counts=-448057 pos=None top=None vel=0.2rpm sw=0x4231 err=0000/0000 emcy=0000 budget=92s msg='Recovery complete at lower limit; call referenc
+CHANGE t=2563.7 en=True busy=True rec=False latch=False counts=-224043 pos=7.69 top=2.0576908416748045 vel=994.6rpm sw=0x5237 err=0000/0000 emcy=0000 budget=110s msg=''
+Traceback (most recent call last):
+  File "/home/phm/wheeltec_robot/src/kinco_lift_control/scripts/field_p2.py", line 186, in <module>
+    raise SystemExit(main())
+  File "/home/phm/wheeltec_robot/src/kinco_lift_control/scripts/field_p2.py", line 160, in main
+    cmd_watch(rospy, String)
+  File "/home/phm/wheeltec_robot/src/kinco_lift_control/scripts/field_p2.py", line 79, in cmd_watch
+    d = cache()
+  File "/home/phm/wheeltec_robot/src/kinco_lift_control/scripts/field_p2.py", line 52, in __call__
+    raise RuntimeError('/lift/status went stale')
+RuntimeError: /lift/status went stale

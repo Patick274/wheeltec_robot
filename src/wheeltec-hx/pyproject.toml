@@ -1,0 +1,22 @@
+[project]
+name = "wheeltec-hx"
+version = "0.1.0"
+description = "轮式升降机器人（wheeltec_03）上位机客户端——仿制 jdyw-hx 机型包架构的精简实现"
+requires-python = ">=3.9"
+dependencies = ["roslibpy>=1.3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]

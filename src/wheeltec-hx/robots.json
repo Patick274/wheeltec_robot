@@ -1,0 +1,9 @@
+{
+  "wheeltec_03": {
+    "model": "wheeltec_03",
+    "domain_id": 0,
+    "protocol": "roslibpy",
+    "endpoint": "ws://192.168.1.100:9090",
+    "tls_ca": ""
+  }
+}

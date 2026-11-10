@@ -1,0 +1,104 @@
+# ============================================================
+# wheeltec-hx 项目说明
+# ============================================================
+# 阅读说明文档,不是运行配置;不要把本文件传给任何启动入口.
+# 2026-11-10 依据当前源码建立;话题/指令表待真机核实(见"待办与回填").
+# 配套文档: docs/architecture.md(分层与仿制差异) / docs/onboarding.md(接入与验证流程)
+
+文档信息:
+  项目名: "wheeltec-hx"
+  定位: "轮式升降机器人(机型 wheeltec_03)的上位机客户端,CLI 形态"
+  仿制对象: "jdyw-hx(Desktop/项目/jdyw-hx)的机型包架构;范围收敛,差异见 docs/architecture.md"
+  机器人: "wheeltec 差速底盘 + kinco FD125 升降柱 + lslidar 雷达 + usb_cam 相机,ROS1 Noetic(Jetson)"
+  上位机环境: "Windows/Linux 均可;Python>=3.9;唯一运行时依赖 roslibpy;不需要装 ROS"
+  连接方式: "仅 roslibpy 腿(rosbridge WebSocket);rclpy 是 ROS2/DDS,连 ROS1 机器人物理上不通"
+  当前阶段: "离线搭建完成,19 项测试全绿;话题表来自机器人侧源码离线阅读,待真机自省核实"
+  注意: "本目录在 catkin 工作空间 src 下但不是 ROS 包;CATKIN_IGNORE 已置,不参与 catkin_make"
+
+# ---------- 这个软件是干什么的 ----------
+作用:
+  一句话: "在没有 ROS 环境的电脑上,经 rosbridge 连接机器人,看数据、发指令"
+  下行(订阅):
+    - "机器人模型描述 /robot_description(URDF 全文)"
+    - "坐标系变换 /tf(动态)+ /tf_static(静态,latch)"
+    - "电池电压 /PowerVoltage(兼作在线心跳,6s 无帧判离线)"
+    - "里程计 /odom(只取 twist 线/角速度;位姿权威是 TF,不走第二条路)"
+    - "IMU /imu、轮关节 /joint_states、相机 /image_raw/compressed"
+    - "升降柱 /lift/status(latch JSON)+ /lift/position_mm + /lift/top_height_m"
+  上行(指令):
+    - "底盘速度 /cmd_vel(geometry_msgs/Twist,带 ttl 看门狗超时回零)"
+    - "升降柱服务 /lift/jog、/lift/move、/lift/move_top_height、/lift/enable、/lift/stop、/lift/escape_upper_limit"
+  白名单纪律: "未在机型表声明的能力词/指令一律拒绝,不猜(仿 jdyw-hx 安全闸)"
+
+# ---------- 目录与逐文件说明 ----------
+目录文件:
+  "README.md": "快速开始与目录导览"
+  "CHANGELOG.md": "版本记录"
+  "pyproject.toml": "包元数据;依赖 roslibpy>=1.3,开发依赖 pytest"
+  "robots.json": "机器人注册表(实例→机型/协议/endpoint);endpoint 是占位,上机先改"
+  "CATKIN_IGNORE": "告知 catkin 跳过本目录(本目录住在 PHM/src 里但不是 ROS 包)"
+  "docs/architecture.md": "分层图、与 jdyw-hx 的差异表、机型包契约、沿用的真机实测纪律"
+  "docs/onboarding.md": "新机型导入五步法 + wheeltec_03 真机核实步骤与回填清单"
+
+  "src/app/composition.py": "★ 装配根,唯一跨层编排者;model_pkgs 是唯一的机型登记点(新增机型只改这一行)"
+  "src/app/main.py": "CLI 入口:list/monitor/endpoint/cmd/vel 五个子命令"
+
+  "src/core/features/robot/_config.py": "RobotSpec + robots.json 读写(原子写);DEFAULT_ROBOTS 占位表"
+  "src/core/features/robot/_catalog.py": "RobotCatalog 注册表所有者(快照+订阅+进程内写落盘;比 jdyw-hx 少了 fs watch)"
+  "src/core/features/robot/_frames.py": "族帧类型:RobotDescriptionFrame/TfFrame/TelemetryFrame/CameraFrame"
+  "src/core/features/robot/_worker.py": "★ RobotLink roslibpy 链路:订阅闸门、latch 补订、心跳看门狗、速度看门狗、上行指令分派(publish/call);连接失败收回后台线程、TCP 通≠rosbridge 的双重确认"
+
+  "src/core/features/robot/wheeltec_03/_topics.py": "★ 话题表 TOPICS + 上行指令表 COMMANDS;每条注明信息来源与核实状态"
+  "src/core/features/robot/wheeltec_03/_worker.py": "parser 集:rosbridge dict → (meta, raw) 两段式契约的前半段"
+  "src/core/features/robot/wheeltec_03/_decode.py": "解帧器:(meta, raw) → 帧对象;未知 kind 告警一次后丢帧"
+  "src/core/features/robot/wheeltec_03/_frames.py": "机型私有帧:LiftStateFrame(JSON 透传)/JointStateFrame"
+  "src/core/features/robot/wheeltec_03/_service.py": "机型自报:词表/电池量程/速度上限/可控部件(chassis+lift)/通信腿(仅 roslibpy)"
+  "src/core/features/robot/wheeltec_03/__init__.py": "机型包出口面(装配根与测试按这些名字消费)"
+
+  "resource/model/wheeltec_03/": "7 个 STL + wheeltec_robot.urdf(2026-11-10 复制自机器人侧 PHM/src/wheeltec_robot)"
+
+  "scripts/run.sh / run.ps1": "运行入口(PYTHONPATH=src 后调 app.main)"
+  "scripts/test.sh / test.ps1": "测试入口(不需要 ROS/真机)"
+  "scripts/introspection_probe.py": "★ 示例5a 通用无资料探测:运行时动态发现 rosapi 命名空间,查类型、递归解字段树;不写死任何资源类型字符串"
+  "scripts/verify_wheeltec_03.py": "★ 示例5b 实机对账:离线期望表 × 在线自省逐条 ✓/✗ + 订阅打印 URDF/TF/升降柱"
+
+  "test/test_model_contract.py": "机型包契约机械校验(遍历 model_pkgs,新机型自动被覆盖)"
+  "test/test_wheeltec_03.py": "parser/decode 纯数据测试(rosbridge JSON 形态样本,两段式契约全走查)"
+
+# ---------- 数据链路形状 ----------
+数据链路:
+  订阅链: "rosbridge → RobotLink(族 _worker) → 机型 parser → (meta, raw) → 机型 decode → 帧对象 → 帧回调(CLI 打印)"
+  两段式契约: "parser 与 decode 分侧同住本机型包;jdyw-hx 中间隔 IPC 子进程,本软件单进程——契约一字不变,将来搬回多进程只加 IPC 不改解析"
+  start_after 闸门: "tf/tf_static 声明 start_after=robot_description——URDF 首帧到达前挂起(jdyw-hx 2026-10-10 口径:URDF 必须先装配完)"
+  latch 补订: "qos=transient_local 的话题 1.5s 一轮先退后订,连续 rearm_dry_limit 轮无新载荷指纹收手(ROS2 rosbridge 回放随机子集的教训,ROS1 latch 一次全量但补订无害)"
+  心跳: "/PowerVoltage 是唯一在线心跳源;6s 无帧判离线;该话题绝不节流(节流丢帧=假离线)"
+  死手: "velocity 指令带 ttl_ms,看门狗超时自动发 zero——防客户端卡住机器人继续跑"
+  上行链: "CLI cmd/vel → RobotLink.send_command → 按 COMMANDS 的 kind 分派:topic→publish / service→call;action 未实现(本机型 ROS1 无 action 服务端在案,真机发现再补)"
+
+# ---------- 话题表来源与核实状态 ----------
+信息来源:
+  纪律: "不许凭空假设;每条注明哪来的、核没核"
+  离线阅读(2026-11-10, PHM/src 机器人侧工作空间):
+    "turn_on_wheeltec_robot/src/wheeltec_robot.cpp": "/PowerVoltage(Float32)、/odom(Odometry)、/imu(Imu)、/lift/base_motion_request(UInt64)"
+    "turn_on_wheeltec_robot/launch/robot_model_visualization.launch": "robot_description 参数 + robot_state_publisher → /tf、/tf_static、/joint_states;senior_wheeltec 车型的 static_transform_publisher(base_link→laser)"
+    "kinco_lift_control/scripts/lift_node.py": "/lift/status(latch String JSON)、position_mm、top_height_m、base_motion_permit 等 6 话题 + 14 服务"
+    "kinco_lift_control/srv/": "JogLift/MoveLift/MoveTopHeight 字段定义(其余升降服务用 std_srvs)"
+    "usb_cam/launch": "/image_raw/compressed(sensor_msgs/CompressedImage,remap 自 usb_cam)"
+  待真机核实: "按 docs/onboarding.md §二跑 verify_wheeltec_03.py 对账;全 ✓ 后删 _topics.py 头部的待核实段"
+
+# ---------- 真机注意事项(离线阅读已观察到) ----------
+注意事项:
+  升降底盘联锁: "底盘节点在升降未给 /lift/base_motion_permit 时强制零速(发速度≠底盘会动;动不了先查 /lift/status——安全特性不是故障)"
+  twist_mux 仲裁: "/cmd_vel 前串了 twist_mux,手柄 cmd_vel_teleop 优先级最高——摇杆在用时上位机速度指令被压制"
+  启动默认只读: "升降柱必须先 /lift/enable 才能动(机器人侧安全设计)"
+  lift_status 形态: "std_msgs/String 承载 latch JSON;字段集以 lift_node.py 的 publish() 为准,本侧 dict 透传不逐字段建模(机器人加字段自动可见)"
+  rosbridge uint8: "uint8[] 经 rosbridge 编成 base64,parser 必须还原(as_bytes)"
+  rosbridge 部署: "机器人侧需 roslaunch rosbridge_server rosbridge_websocket.launch(默认 9090);这是上机前置条件"
+
+# ---------- 待办与回填清单 ----------
+待办:
+  - "上机:改 robots.json 的 endpoint 为真机地址(当前占位 ws://192.168.1.100:9090,实测该地址有 TCP 监听但不是 rosbridge)"
+  - "上机:跑 scripts/verify_wheeltec_03.py 对账话题表,全 ✓ 后删 _topics.py 待核实标注"
+  - "回填:_service.py VELOCITY_LINEAR_MAX/ANGULAR_MAX(注意机器人侧 100rpm 升降联锁限速,m/s 待实测;现按 jdyw_02 保守值 0.3/0.5 暂填)"
+  - "回填:_service.py BATTERY_EMPTY_V/FULL_V(24V 电池按 7S 锂电暂填 21.0–29.4;对照 /PowerVoltage 满充/放空读数核实)"
+  - "若真机自省发现 action 服务端:族 _worker.RobotLink.send_command 补 action kind 后再进 COMMANDS"
